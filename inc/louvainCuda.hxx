@@ -1,19 +1,20 @@
 #pragma once
-#include <tuple>
+#include <cstdint>
 #include <vector>
 #include <algorithm>
 #include "_main.hxx"
-#include "Graph.hxx"
 #include "properties.hxx"
 #include "louvain.hxx"
 #include "hashtableCuda.hxx"
 
+using std::vector;
 using std::count_if;
 using std::max;
 using std::min;
 using std::partition;
-using std::tuple;
-using std::vector;
+
+
+
 
 #pragma region DEGREE LIMITS
 #ifndef LOUVAIN_DEGREE_THREAD
@@ -23,6 +24,9 @@ using std::vector;
 #define LOUVAIN_DEGREE_BLOCK_SHARED 128
 #endif
 #pragma endregion
+
+
+
 
 #pragma region METHODS
 #pragma region INITIALIZE
@@ -36,21 +40,19 @@ using std::vector;
  * @param NE end vertex (exclusive)
  */
 template <class O, class K, class V, class W>
-void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE)
-{
+void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
     size_t EO = xoff[u];
-    size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
-    if (EN >= LOUVAIN_DEGREE_THREAD)
-      continue; // Skip high-degree vertices
+    size_t EN = xdeg[u];
+    if (EN >= LOUVAIN_DEGREE_THREAD) continue; // Skip high-degree vertices
     W w = W();
-    for (size_t i = 0; i < EN; ++i)
-      w += xwei[EO + i];
+    for (size_t i=0; i<EN; ++i)
+      w += xwei[EO+i];
     vtot[u] = w;
   }
 }
+
 
 /**
  * Find the total edge weight of each vertex.
@@ -62,12 +64,12 @@ void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *
  * @param NE end vertex (exclusive)
  */
 template <class O, class K, class V, class W>
-inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, LOUVAIN_DEGREE_THREAD);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE {
+  const int B = blockSizeCu(NE-NB, LOUVAIN_DEGREE_THREAD);
+  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainVertexWeightsThreadCukW<<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
 }
+
 
 /**
  * Find the total edge weight of each vertex [kernel].
@@ -79,26 +81,23 @@ inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg,
  * @param NE end vertex (exclusive)
  */
 template <class O, class K, class V, class W>
-void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE)
-{
+void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ W cache[BLOCK_LIMIT_MAP_CUDA];
-  for (K u = NB + b; u < NE; u += G)
-  {
+  for (K u=NB+b; u<NE; u+=G) {
     size_t EO = xoff[u];
-    size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
-    if (EN < LOUVAIN_DEGREE_THREAD)
-      continue; // Skip low-degree vertices
+    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+    if (EN < LOUVAIN_DEGREE_THREAD) continue; // Skip low-degree vertices
     W w = W();
-    for (size_t i = t; i < EN; i += B)
-      w += xwei[EO + i];
+    for (size_t i=t; i<EN; i+=B)
+      w += xwei[EO+i];
     cache[t] = w;
     __syncthreads();
     sumValuesBlockReduceCudU(cache, B, t);
-    if (t == 0)
-      vtot[u] = cache[0];
+    if (t==0) vtot[u] = cache[0];
   }
 }
+
 
 /**
  * Find the total edge weight of each vertex.
@@ -110,12 +109,12 @@ void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *x
  * @param NE end vertex (exclusive)
  */
 template <class O, class K, class V, class W>
-inline void louvainVertexWeightsBlockCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE)
-{
-  const int B = blockSizeCu<true>(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu<true>(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainVertexWeightsBlockCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
+  const int B = blockSizeCu<true>(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu<true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainVertexWeightsBlockCukW<<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
 }
+
 
 /**
  * Find the total edge weight of each community [kernel].
@@ -126,16 +125,15 @@ inline void louvainVertexWeightsBlockCuW(W *vtot, const O *xoff, const K *xdeg, 
  * @param NE end vertex (exclusive)
  */
 template <class K, class W>
-void __global__ louvainCommunityWeightsCukU(W *ctot, const K *vcom, const W *vtot, K NB, K NE)
-{
+void __global__ louvainCommunityWeightsCukU(W *ctot, const K *vcom, const W *vtot, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
     K c = vcom[u];
     atomicAdd(&ctot[c], vtot[u]);
     // CHECK: Too many atomic ops.?
   }
 }
+
 
 /**
  * Find the total edge weight of each community.
@@ -146,12 +144,12 @@ void __global__ louvainCommunityWeightsCukU(W *ctot, const K *vcom, const W *vto
  * @param NE end vertex (exclusive)
  */
 template <class K, class W>
-inline void louvainCommunityWeightsCuU(W *ctot, const K *vcom, const W *vtot, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainCommunityWeightsCuU(W *ctot, const K *vcom, const W *vtot, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainCommunityWeightsCukU<<<G, B>>>(ctot, vcom, vtot, NB, NE);
 }
+
 
 /**
  * Initialize communities such that each vertex is its own community [kernel].
@@ -162,15 +160,14 @@ inline void louvainCommunityWeightsCuU(W *ctot, const K *vcom, const W *vtot, K 
  * @param NE end vertex (exclusive)
  */
 template <class K, class W>
-void __global__ louvainInitializeCukW(K *vcom, W *ctot, const W *vtot, K NB, K NE)
-{
+void __global__ louvainInitializeCukW(K *vcom, W *ctot, const W *vtot, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
     vcom[u] = u;
     ctot[u] = vtot[u];
   }
 }
+
 
 /**
  * Initialize communities such that each vertex is its own community.
@@ -181,13 +178,15 @@ void __global__ louvainInitializeCukW(K *vcom, W *ctot, const W *vtot, K NB, K N
  * @param NE end vertex (exclusive)
  */
 template <class K, class W>
-inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainInitializeCukW<<<G, B>>>(vcom, ctot, vtot, NB, NE);
 }
 #pragma endregion
+
+
+
 
 #pragma region CHOOSE COMMUNITY
 /**
@@ -208,20 +207,18 @@ inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE)
  * @param DI index stride
  */
 template <bool SELF = false, bool BLOCK = false, class O, class K, class V, class W>
-inline void __device__ louvainScanCommunitiesCudU(K *hk, W *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI)
-{
+inline void __device__ louvainScanCommunitiesCudU(K *hk, W *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI) {
   size_t EO = xoff[u];
-  size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
-  for (; i < EN; i += DI)
-  {
-    K v = xedg[EO + i];
-    W w = xwei[EO + i];
+  size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+  for (; i<EN; i+=DI) {
+    K v = xedg[EO+i];
+    W w = xwei[EO+i];
     K c = vcom[v];
-    if (!SELF && u == v)
-      continue;
-    hashtableAccumulateCudU<BLOCK>(hk, hv, H, T, c + 1, w);
+    if (!SELF && u==v) continue;
+    hashtableAccumulateCudU<BLOCK>(hk, hv, H, T, c+1, w);
   }
 }
+
 
 /**
  * Calculate delta modularity of moving a vertex to each community [device function].
@@ -239,16 +236,14 @@ inline void __device__ louvainScanCommunitiesCudU(K *hk, W *hv, size_t H, size_t
  * @param DI index stride
  */
 template <class K, class W>
-inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, W *hv, size_t H, K d, const W *ctot, W vdout, W vtot, W dtot, W M, W R, size_t i, size_t DI)
-{
-  for (; i < H; i += DI)
-  {
-    if (!hk[i])
-      continue;
+inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, W *hv, size_t H, K d, const W *ctot, W vdout, W vtot, W dtot, W M, W R, size_t i, size_t DI) {
+  for (; i<H; i+=DI) {
+    if (!hk[i]) continue;
     K c = hk[i] - 1;
     hv[i] = deltaModularityCud(hv[i], vdout, vtot, ctot[c], dtot, M, R);
   }
 }
+
 
 /**
  * Mark out-neighbors of a vertex as affected [device function].
@@ -261,17 +256,18 @@ inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, W *hv, size_t 
  * @param DI index stride
  */
 template <class O, class K, class F>
-inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K *xdeg, const K *xedg, K u, size_t i, size_t DI)
-{
+inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K *xdeg, const K *xedg, K u, size_t i, size_t DI) {
   size_t EO = xoff[u];
-  size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
-  for (; i < EN; i += DI)
-  {
-    K v = xedg[EO + i];
+  size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+  for (; i<EN; i+=DI) {
+    K v = xedg[EO+i];
     vaff[v] = F(1); // TODO: Use two (synchronous) buffers?
   }
 }
 #pragma endregion
+
+
+
 
 #pragma region LOCAL-MOVING PHASE
 /**
@@ -294,48 +290,40 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
  * @param PICKLESS allow only picking smaller community id?
  */
 template <class O, class K, class V, class W, class F>
-void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS)
-{
+void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[LOUVAIN_DEGREE_THREAD];
   const int MAX_DEGREE = LOUVAIN_DEGREE_THREAD;
-  K shrk[2 * MAX_DEGREE];
-  W shrw[2 * MAX_DEGREE];
+  K shrk[2*MAX_DEGREE];
+  W shrw[2*MAX_DEGREE];
   elb[t] = 0;
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
-    if (!vaff[u])
-      continue;
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
+    if (!vaff[u]) continue;
     // Scan communities connected to u.
     K d = vcom[u];
     // size_t EO = xoff[u]
-    size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
-    if (EN == 0)
-      continue; // Skip isolated vertices
-    if (EN >= LOUVAIN_DEGREE_THREAD)
-      continue; // Skip high-degree vertices
+    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+    if (EN==0) continue;                       // Skip isolated vertices
+    if (EN >= LOUVAIN_DEGREE_THREAD) continue; // Skip high-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H) - 1;
-    K *hk = shrk; // bufk + 2*EO
-    W *hv = shrw; // bufw + 2*EO
+    K *hk = shrk;  // bufk + 2*EO
+    W *hv = shrw;  // bufw + 2*EO
     hashtableClearCudW(hk, hv, H, 0, 1);
     louvainScanCommunitiesCudU(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     // Calculate delta modularity of moving u to each community.
-    W vdout = hashtableGetCud(hk, hv, H, T, d + 1);
+    W vdout = hashtableGetCud(hk, hv, H, T, d+1);
     louvainCalculateDeltaModularityCudU(hk, hv, H, d, ctot, vdout, vtot[u], ctot[d], M, R, 0, 1);
     // Find best community for u.
     hashtableMaxCudU(hk, hv, H, 0, 1);
-    vaff[u] = F(); // Mark u as unaffected (TODO: Use two buffers?)
-    if (hv[0] <= W())
-      continue;      // No good community found
-    K c = hk[0] - 1; // Best community
-    if (c == d)
-      continue;
-    if (PICKLESS && c > d)
-      continue; // Pick smaller community-id (to avoid community swaps)
+    vaff[u] = F();               // Mark u as unaffected (TODO: Use two buffers?)
+    if (hv[0] <= W()) continue;  // No good community found
+    K c = hk[0] - 1;             // Best community
+    if (c==d) continue;
+    if (PICKLESS && c>d) continue; // Pick smaller community-id (to avoid community swaps)
     // Change community of u.
     atomicAdd(&ctot[d], -vtot[u]);
-    atomicAdd(&ctot[c], vtot[u]);
+    atomicAdd(&ctot[c],  vtot[u]);
     vcom[u] = c;
     elb[t] += hv[0];
     louvainMarkNeighborsCudU(vaff, xoff, xdeg, xedg, u, 0, 1);
@@ -343,9 +331,9 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
   // Update total delta modularity.
   __syncthreads();
   sumValuesBlockReduceCudU(elb, B, t);
-  if (t == 0)
-    atomicAdd(el, elb[0]);
+  if (t==0) atomicAdd(el, elb[0]);
 }
+
 
 /**
  * Move each vertex to its best community, using block-per-vertex approach.
@@ -367,12 +355,12 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
  * @param PICKLESS allow only picking smaller community id?
  */
 template <class O, class K, class V, class W, class F>
-inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS)
-{
-  const int B = blockSizeCu(NE - NB, LOUVAIN_DEGREE_THREAD);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
+  const int B = blockSizeCu(NE-NB, LOUVAIN_DEGREE_THREAD);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainMoveThreadCukU<<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
 }
+
 
 /**
  * Move each vertex to its best community, using block-per-vertex approach [kernel].
@@ -394,77 +382,60 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
  * @param PICKLESS allow only picking smaller community id?
  */
 template <class O, class K, class V, class W, class F>
-void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS)
-{
+void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   const int MAX_DEGREE = LOUVAIN_DEGREE_BLOCK_SHARED;
-  __shared__ K shrk[2 * MAX_DEGREE];
-  __shared__ W shrw[2 * MAX_DEGREE];
+  __shared__ K shrk[2*MAX_DEGREE];
+  __shared__ W shrw[2*MAX_DEGREE];
   __shared__ double elb;
   __shared__ bool vaffu;
   __shared__ K d;
   __shared__ W vdout;
-  if (t == 0)
-    elb = 0;
-  for (K u = NB + b; u < NE; u += G)
-  {
+  if (t==0) elb = 0;
+  for (K u=NB+b; u<NE; u+=G) {
     __syncthreads();
-    if (t == 0)
-      vaffu = vaff[u];
-    if (t == 0)
-      d = vcom[u];
+    if (t==0) vaffu = vaff[u];
+    if (t==0) d = vcom[u];
     __syncthreads();
-    if (!vaffu)
-      continue;
+    if (!vaffu) continue;
     // Scan communities connected to u.
     size_t EO = xoff[u];
-    size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
-    if (EN == 0)
-      continue; // Skip isolated vertices
-    if (EN < LOUVAIN_DEGREE_THREAD)
-      continue; // Skip low-degree vertices
+    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+    if (EN==0) continue;                       // Skip isolated vertices
+    if (EN < LOUVAIN_DEGREE_THREAD) continue;  // Skip low-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H) - 1;
-    K *hk = EN <= MAX_DEGREE ? shrk : bufk + 2 * EO;
-    W *hv = EN <= MAX_DEGREE ? shrw : bufw + 2 * EO;
+    K *hk = EN <= MAX_DEGREE? shrk : bufk + 2*EO;
+    W *hv = EN <= MAX_DEGREE? shrw : bufw + 2*EO;
     __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
     louvainScanCommunitiesCudU<false, true>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     __syncthreads();
     // Calculate delta modularity of moving u to each community.
-    if (t == 0)
-      vdout = hashtableGetCud(hk, hv, H, T, d + 1);
+    if (t==0) vdout = hashtableGetCud(hk, hv, H, T, d+1);
     __syncthreads();
     louvainCalculateDeltaModularityCudU(hk, hv, H, d, ctot, vdout, vtot[u], ctot[d], M, R, t, B);
     __syncthreads();
     // Find best community for u.
     hashtableMaxCudU<true>(hk, hv, H, t, B);
     __syncthreads();
-    if (t == 0)
-      vaff[u] = F(); // Mark u as unaffected (TODO: Use two buffers?)
-    if (!hk[0] || hv[0] <= W())
-      continue;      // No good community found (TODO: Cache hk[0], hv[0]?)
+    if (t==0) vaff[u] = F();               // Mark u as unaffected (TODO: Use two buffers?)
+    if (!hk[0] || hv[0] <= W()) continue;  // No good community found (TODO: Cache hk[0], hv[0]?)
     K c = hk[0] - 1; // Best community
-    if (c == d)
-      continue;
-    if (PICKLESS && c > d)
-      continue; // Pick smaller community-id (to avoid community swaps)
+    if (c==d) continue;
+    if (PICKLESS && c>d) continue; // Pick smaller community-id (to avoid community swaps)
     // Change community of u.
-    if (t == 0)
-      atomicAdd(&ctot[d], -vtot[u]);
-    if (t == 0)
-      atomicAdd(&ctot[c], vtot[u]);
-    if (t == 0)
-      vcom[u] = c;
-    if (t == 0)
-      elb += hv[0];
+    if (t==0) atomicAdd(&ctot[d], -vtot[u]);
+    if (t==0) atomicAdd(&ctot[c],  vtot[u]);
+    if (t==0) vcom[u] = c;
+    if (t==0) elb += hv[0];
     louvainMarkNeighborsCudU(vaff, xoff, xdeg, xedg, u, t, B);
   }
   // Update total delta modularity.
-  if (t == 0)
-    atomicAdd(el, elb);
+  if (t==0) atomicAdd(el, elb);
 }
+
 
 /**
  * Move each vertex to its best community, using block-per-vertex approach.
@@ -486,12 +457,12 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
  * @param PICKLESS allow only picking smaller community id?
  */
 template <class O, class K, class V, class W, class F>
-inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS)
-{
-  const int B = blockSizeCu<true>(NE - NB, LOUVAIN_DEGREE_BLOCK_SHARED);
-  const int G = gridSizeCu<true>(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
+  const int B = blockSizeCu<true>(NE-NB, LOUVAIN_DEGREE_BLOCK_SHARED);
+  const int G = gridSizeCu<true> (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainMoveBlockCukU<<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
 }
+
 
 /**
  * Louvain algorithm's local moving phase
@@ -514,24 +485,24 @@ inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, 
  * @param fc has local moving phase converged?
  */
 template <class O, class K, class V, class W, class F, class FC>
-inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc)
-{
+inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
   int l = 0;
   double elH = 0;
   const int PICKSTEP = 4;
-  while (l < L)
-  {
+  while (l < L) {
     bool PICKLESS = (l + PICKSTEP / 2) % PICKSTEP == 0;
     fillValueCuW(el, 1, 0.0);
     louvainMoveThreadCuU(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
-    louvainMoveBlockCuU(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
+    louvainMoveBlockCuU (el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
     TRY_CUDA(cudaMemcpy(&elH, el, sizeof(double), cudaMemcpyDeviceToHost));
-    if (fc(elH, l++))
-      break;
+    if (fc(elH, l++)) break;
   }
   return l > 1 || elH ? l : 0;
 }
 #pragma endregion
+
+
+
 
 #pragma region COMMUNITY PROPERTIES
 /**
@@ -543,25 +514,21 @@ inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *buf
  * @param NE end vertex (exclusive)
  */
 template <class K, class A>
-void __global__ louvainCommunityExistsCukU(uint64_cu *C, A *a, const K *vcom, K NB, K NE)
-{
+void __global__ louvainCommunityExistsCukU(uint64_cu *C, A *a, const K *vcom, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ uint64_cu CB[BLOCK_LIMIT_MAP_CUDA];
   CB[t] = uint64_cu();
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
     K c = vcom[u];
-    if (a[c])
-      continue;
-    if (atomicCAS(&a[c], uint64_cu(), uint64_cu(1)) == uint64_cu())
-      ++CB[t];
+    if (a[c]) continue;
+    if (atomicCAS(&a[c], uint64_cu(), uint64_cu(1)) == uint64_cu()) ++CB[t];
     // CHECK: Too many atomic ops.?
   }
   __syncthreads();
   sumValuesBlockReduceCudU(CB, B, t);
-  if (t == 0)
-    atomicAdd(C, CB[0]);
+  if (t==0) atomicAdd(C, CB[0]);
 }
+
 
 /**
  * Examine if each community exists.
@@ -572,12 +539,12 @@ void __global__ louvainCommunityExistsCukU(uint64_cu *C, A *a, const K *vcom, K 
  * @param NE end vertex (exclusive)
  */
 template <class K, class A>
-inline void louvainCommunityExistsCuU(uint64_cu *C, A *a, const K *vcom, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainCommunityExistsCuU(uint64_cu *C, A *a, const K *vcom, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainCommunityExistsCukU<<<G, B>>>(C, a, vcom, NB, NE);
 }
+
 
 /**
  * Find the total degree of each community [kernel].
@@ -588,17 +555,16 @@ inline void louvainCommunityExistsCuU(uint64_cu *C, A *a, const K *vcom, K NB, K
  * @param NE end vertex (exclusive)
  */
 template <class K, class A>
-void __global__ louvainCommunityTotalDegreeCukU(A *a, const K *xdeg, const K *vcom, K NB, K NE)
-{
+void __global__ louvainCommunityTotalDegreeCukU(A *a, const K *xdeg, const K *vcom, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
-    size_t EN = xdeg[u]; // xoff[u+1] - xoff[u]
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
+    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
     K c = vcom[u];
     atomicAdd(&a[c], A(EN));
     // CHECK: Too many atomic ops.?
   }
 }
+
 
 /**
  * Find the total degree of each community.
@@ -609,12 +575,12 @@ void __global__ louvainCommunityTotalDegreeCukU(A *a, const K *xdeg, const K *vc
  * @param NE end vertex (exclusive)
  */
 template <class K, class A>
-inline void louvainCommunityTotalDegreeCuU(A *a, const K *xdeg, const K *vcom, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainCommunityTotalDegreeCuU(A *a, const K *xdeg, const K *vcom, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainCommunityTotalDegreeCukU<<<G, B>>>(a, xdeg, vcom, NB, NE);
 }
+
 
 /**
  * Find the number of vertices in each community [kernel].
@@ -624,16 +590,15 @@ inline void louvainCommunityTotalDegreeCuU(A *a, const K *xdeg, const K *vcom, K
  * @param NE end vertex (exclusive)
  */
 template <class K, class A>
-void __global__ louvainCountCommunityVerticesCukU(A *a, const K *vcom, K NB, K NE)
-{
+void __global__ louvainCountCommunityVerticesCukU(A *a, const K *vcom, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
     K c = vcom[u];
     atomicAdd(&a[c], A(1));
     // CHECK: Too many atomic ops.?
   }
 }
+
 
 /**
  * Find the number of vertices in each community.
@@ -643,12 +608,12 @@ void __global__ louvainCountCommunityVerticesCukU(A *a, const K *vcom, K NB, K N
  * @param NE end vertex (exclusive)
  */
 template <class K, class A>
-inline void louvainCountCommunityVerticesCuU(A *a, const K *vcom, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_REDUCE_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_REDUCE_CUDA);
+inline void louvainCountCommunityVerticesCuU(A *a, const K *vcom, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_REDUCE_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_REDUCE_CUDA);
   louvainCountCommunityVerticesCukU<<<G, B>>>(a, vcom, NB, NE);
 }
+
 
 /**
  * Populate community vertices into a CSR structure.
@@ -660,17 +625,16 @@ inline void louvainCountCommunityVerticesCuU(A *a, const K *vcom, K NB, K NE)
  * @param NE end vertex (exclusive)
  */
 template <class K>
-void __global__ louvainPopulateCommunityVerticesCukU(K *cdeg, K *cedg, const K *coff, const K *vcom, K NB, K NE)
-{
+void __global__ louvainPopulateCommunityVerticesCukU(K *cdeg, K *cedg, const K *coff, const K *vcom, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
-  {
+  for (K u=NB+B*b+t; u<NE; u+=G*B) {
     K c = vcom[u];
     K n = atomicAdd(&cdeg[c], K(1));
     K i = coff[c] + n;
     cedg[i] = u;
   }
 }
+
 
 /**
  * Populate community vertices into a CSR structure.
@@ -682,12 +646,12 @@ void __global__ louvainPopulateCommunityVerticesCukU(K *cdeg, K *cedg, const K *
  * @param NE end vertex (exclusive)
  */
 template <class K>
-inline void louvainPopulateCommunityVerticesCuU(K *cdeg, K *cedg, const K *coff, const K *vcom, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainPopulateCommunityVerticesCuU(K *cdeg, K *cedg, const K *coff, const K *vcom, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainPopulateCommunityVerticesCukU<<<G, B>>>(cdeg, cedg, coff, vcom, NB, NE);
 }
+
 
 /**
  * Find the vertices in each community.
@@ -701,15 +665,17 @@ inline void louvainPopulateCommunityVerticesCuU(K *cdeg, K *cedg, const K *coff,
  * @param SCAN size of buffer for exclusive scan
  */
 template <class K>
-inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, const K *vcom, K N, K C, size_t SCAN)
-{
+inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, const K *vcom, K N, K C, size_t SCAN) {
   fillValueCuW(cdeg, C, K());
-  fillValueCuW(coff, C + 1, K());
+  fillValueCuW(coff, C+1, K());
   louvainCountCommunityVerticesCuU(coff, vcom, K(), N);
-  exclusiveScanCubW(coff, bufk, coff, C + 1, SCAN);
+  exclusiveScanCubW(coff, bufk, coff, C+1, SCAN);
   louvainPopulateCommunityVerticesCuU(cdeg, cedg, coff, vcom, K(), N);
 }
 #pragma endregion
+
+
+
 
 #pragma region LOOKUP COMMUNITIES
 /**
@@ -720,10 +686,9 @@ inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, cons
  * @param NE end vertex (exclusive)
  */
 template <class K>
-void __global__ louvainLookupCommunitiesCukU(K *a, const K *vcom, K NB, K NE)
-{
+void __global__ louvainLookupCommunitiesCukU(K *a, const K *vcom, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K u = NB + B * b + t; u < NE; u += G * B)
+  for (K u=NB+B*b+t; u<NE; u+=G*B)
     a[u] = vcom[a[u]];
 }
 
@@ -735,13 +700,15 @@ void __global__ louvainLookupCommunitiesCukU(K *a, const K *vcom, K NB, K NE)
  * @param NE end vertex (exclusive)
  */
 template <class K>
-inline void louvainLookupCommunitiesCuU(K *a, const K *vcom, K NB, K NE)
-{
-  const int B = blockSizeCu(NE - NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE - NB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainLookupCommunitiesCuU(K *a, const K *vcom, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainLookupCommunitiesCukU<<<G, B>>>(a, vcom, NB, NE);
 }
 #pragma endregion
+
+
+
 
 #pragma region AGGREGATION PHASE
 /**
@@ -753,12 +720,12 @@ inline void louvainLookupCommunitiesCuU(K *a, const K *vcom, K NB, K NE)
  * @param SCAN size of buffer for exclusive scan
  */
 template <class K>
-inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t SCAN)
-{
+inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t SCAN) {
   exclusiveScanCubW(cext, bufk, cext, N, SCAN);
   louvainLookupCommunitiesCuU(vcom, cext, K(), N);
 }
 
+
 /**
  * Aggregate outgoing edges of each community [kernel].
  * @param ydeg degrees of aggregated graph (updated)
@@ -778,38 +745,31 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
  * @param CE end community (exclusive)
  */
 template <class O, class K, class V, class W>
-void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE)
-{
+void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   const int MAX_DEGREE = LOUVAIN_DEGREE_THREAD;
-  K shrk[2 * MAX_DEGREE];
-  W shrw[2 * MAX_DEGREE];
-  for (K c = CB + B * b + t; c < CE; c += G * B)
-  {
+  K shrk[2*MAX_DEGREE];
+  W shrw[2*MAX_DEGREE];
+  for (K c=CB+B*b+t; c<CE; c+=G*B) {
     size_t EO = yoff[c];
-    size_t EN = yoff[c + 1] - yoff[c];
+    size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
-    size_t CN = coff[c + 1] - coff[c];
-    if (CN == 0)
-      continue; // Skip empty communities
-    if (EN >= LOUVAIN_DEGREE_THREAD)
-      continue; // Skip communities with large total degree
+    size_t CN = coff[c+1] - coff[c];
+    if (CN==0) continue;                       // Skip empty communities
+    if (EN >= LOUVAIN_DEGREE_THREAD) continue; // Skip communities with large total degree
     size_t H = nextPow2Cud(EN) - 1;
-    size_t T = nextPow2Cud(H) - 1;
-    K *hk = shrk; // bufk + 2*EO
-    W *hv = shrw; // bufw + 2*EO
+    size_t T = nextPow2Cud(H)  - 1;
+    K *hk = shrk;  // bufk + 2*EO
+    W *hv = shrw;  // bufw + 2*EO
     // Get edges from community c into hashtable.
     hashtableClearCudW(hk, hv, H, 0, 1);
-    for (size_t i = 0; i < CN; ++i)
-    {
-      K u = cedg[CO + i];
+    for (size_t i=0; i<CN; ++i) {
+      K u = cedg[CO+i];
       louvainScanCommunitiesCudU<true>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     }
     // Store edges from hashtable into aggregated graph.
-    for (size_t i = 0; i < H; ++i)
-    {
-      if (hk[i] == K())
-        continue;
+    for (size_t i=0; i<H; ++i) {
+      if (hk[i]==K()) continue;
       K d = hk[i] - 1;
       K n = atomicAdd(&ydeg[c], K(1));
       O j = yoff[c] + n;
@@ -818,6 +778,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
     }
   }
 }
+
 
 /**
  * Aggregate outgoing edges of each community.
@@ -838,12 +799,12 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
  * @param CE end community (exclusive)
  */
 template <class O, class K, class V, class W>
-inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE)
-{
-  const int B = blockSizeCu(CE - CB, LOUVAIN_DEGREE_THREAD);
-  const int G = gridSizeCu(CE - CB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
+  const int B = blockSizeCu(CE-CB, LOUVAIN_DEGREE_THREAD);
+  const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_MAP_CUDA);
   louvainAggregateEdgesThreadCukU<<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
+
 
 /**
  * Aggregate outgoing edges of each community [kernel].
@@ -864,39 +825,32 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W
  * @param CE end community (exclusive)
  */
 template <class O, class K, class V, class W>
-void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE)
-{
+void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
-  for (K c = CB + b; c < CE; c += G)
-  {
+  for (K c=CB+b; c<CE; c+=G) {
     __syncthreads();
     size_t EO = yoff[c];
-    size_t EN = yoff[c + 1] - yoff[c];
+    size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
-    size_t CN = coff[c + 1] - coff[c];
-    if (CN == 0)
-      continue; // Skip empty communities
-    if (EN < LOUVAIN_DEGREE_THREAD)
-      continue; // Skip communities with small total degree
+    size_t CN = coff[c+1] - coff[c];
+    if (CN==0) continue;                      // Skip empty communities
+    if (EN < LOUVAIN_DEGREE_THREAD) continue; // Skip communities with small total degree
     size_t H = nextPow2Cud(EN) - 1;
-    size_t T = nextPow2Cud(H) - 1;
-    K *hk = bufk + 2 * EO;
-    W *hv = bufw + 2 * EO;
+    size_t T = nextPow2Cud(H)  - 1;
+    K *hk = bufk + 2*EO;
+    W *hv = bufw + 2*EO;
     // Get edges from community c into hashtable.
     __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
-    for (size_t i = 0; i < CN; ++i)
-    {
-      K u = cedg[CO + i];
+    for (size_t i=0; i<CN; ++i) {
+      K u = cedg[CO+i];
       louvainScanCommunitiesCudU<true, true>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     }
     // Store edges from hashtable into aggregated graph.
     __syncthreads();
-    for (size_t i = t; i < H; i += B)
-    {
-      if (hk[i] == K())
-        continue;
+    for (size_t i=t; i<H; i+=B) {
+      if (hk[i]==K()) continue;
       K d = hk[i] - 1;
       K n = atomicAdd(&ydeg[c], K(1));
       O j = yoff[c] + n;
@@ -905,6 +859,7 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     }
   }
 }
+
 
 /**
  * Aggregate outgoing edges of each community.
@@ -925,12 +880,12 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
  * @param CE end community (exclusive)
  */
 template <class O, class K, class V, class W>
-inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE)
-{
-  const int B = blockSizeCu<true>(CE - CB, 4 * LOUVAIN_DEGREE_BLOCK_SHARED);
-  const int G = gridSizeCu<true>(CE - CB, B, GRID_LIMIT_MAP_CUDA);
+inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
+  const int B = blockSizeCu<true>(CE-CB, 4*LOUVAIN_DEGREE_BLOCK_SHARED);
+  const int G = gridSizeCu<true> (CE-CB, B, GRID_LIMIT_MAP_CUDA);
   louvainAggregateEdgesBlockCukU<<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
+
 
 /**
  * Louvain algorithm's community aggregation phase.
@@ -953,34 +908,18 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W 
  * @param SCAN size of buffer for exclusive scan
  */
 template <class O, class K, class V, class W>
-inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t SCAN)
-{
-  fillValueCuW(yoff, C + 1, O());
+inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t SCAN) {
+  fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
-  float temp1 = 0, temp2 = 0, temp3 = 0;
-
-  TRY_CUDA(cudaDeviceSynchronize());
-  temp1 += measureDuration([&]()
-                           { louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
-        TRY_CUDA( cudaDeviceSynchronize() ); });
-
-  TRY_CUDA(cudaDeviceSynchronize());
-  temp2 += measureDuration([&]()
-                           { exclusiveScanCubW(yoff, bufo, yoff, C + 1, SCAN);
-                           TRY_CUDA( cudaDeviceSynchronize() ); });
-
-  TRY_CUDA(cudaDeviceSynchronize());
-  temp3 += measureDuration([&]()
-                           {
-                             louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-                             louvainAggregateEdgesBlockCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-  TRY_CUDA(cudaDeviceSynchronize()); });
-
-  printf("\nlouvainCommunityTotalDegreeCuU: %f\n", temp1);
-  printf("exclusiveScanSubW: %f\n", temp2);
-  printf("louvainAggregateEdges: %f\n", temp3);
+  louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
+  exclusiveScanCubW(yoff, bufo, yoff, C+1, SCAN);
+  louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesBlockCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
 }
 #pragma endregion
+
+
+
 
 #pragma region PARTITION
 /**
@@ -990,23 +929,22 @@ inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *
  * @returns number of low-degree vertices
  */
 template <class G, class K>
-inline size_t louvainPartitionVerticesCudaU(vector<K> &ks, const G &x)
-{
-  K SWITCH_DEGREE = 64; // Switch to block-per-vertex approach if degree >= SWITCH_DEGREE
-  K SWITCH_LIMIT = 64;  // Avoid switching if number of vertices < SWITCH_LIMIT
+inline size_t louvainPartitionVerticesCudaU(vector<K> &ks, const G &x) {
+  K SWITCH_DEGREE = 64;  // Switch to block-per-vertex approach if degree >= SWITCH_DEGREE
+  K SWITCH_LIMIT  = 64;  // Avoid switching if number of vertices < SWITCH_LIMIT
   size_t N = ks.size();
-  auto kb = ks.begin(), ke = ks.end();
-  auto ft = [&](K v)
-  { return x.degree(v) < SWITCH_DEGREE; };
+  auto  kb = ks.begin(), ke = ks.end();
+  auto  ft = [&](K v) { return x.degree(v) < SWITCH_DEGREE; };
   partition(kb, ke, ft);
   size_t n = count_if(kb, ke, ft);
-  if (n < SWITCH_LIMIT)
-    n = 0;
-  if (N - n < SWITCH_LIMIT)
-    n = N;
+  if (n   < SWITCH_LIMIT) n = 0;
+  if (N-n < SWITCH_LIMIT) n = N;
   return n;
 }
 #pragma endregion
+
+
+
 
 #pragma region ENVIRONMENT SETUP
 /**
@@ -1018,8 +956,7 @@ inline size_t louvainPartitionVerticesCudaU(vector<K> &ks, const G &x)
  * @returns louvain result
  */
 template <bool DYNAMIC = false, class FLAG = char, class G, class FI, class FM>
-inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
-{
+inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm) {
   using K = typename G::key_type;
   using V = typename G::edge_value_type;
   using W = LOUVAIN_WEIGHT_TYPE;
@@ -1047,12 +984,9 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
   vector<K> xdeg(N);           // Degrees of original graph
   vector<K> xedg(X);           // Edge keys of original graph
   vector<V> xwei(X);           // Edge values of original graph
-  if (!DYNAMIC)
-    ucom.resize(S);
-  if (!DYNAMIC)
-    utot.resize(S);
-  if (!DYNAMIC)
-    ctot.resize(S);
+  if (!DYNAMIC) ucom.resize(S);
+  if (!DYNAMIC) utot.resize(S);
+  if (!DYNAMIC) ctot.resize(S);
   // Allocate buffers on device.
   F *vaffD = nullptr;
   K *ucomD = nullptr, *vcomD = nullptr;
@@ -1077,24 +1011,24 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
   TRY_CUDA(cudaMalloc(&vtotD, N * sizeof(W)));
   TRY_CUDA(cudaMalloc(&ctotD, N * sizeof(W)));
   TRY_CUDA(cudaMalloc(&bufoD, N * sizeof(O)));
-  TRY_CUDA(cudaMalloc(&bufkD, (2 * X) * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&bufwD, (2 * X) * sizeof(W)));
-  TRY_CUDA(cudaMalloc(&xoffD, (N + 1) * sizeof(O)));
+  TRY_CUDA(cudaMalloc(&bufkD, (2*X) * sizeof(K)));
+  TRY_CUDA(cudaMalloc(&bufwD, (2*X) * sizeof(W)));
+  TRY_CUDA(cudaMalloc(&xoffD, (N+1) * sizeof(O)));
   TRY_CUDA(cudaMalloc(&xdegD, N * sizeof(O)));
   TRY_CUDA(cudaMalloc(&xedgD, X * sizeof(K)));
   TRY_CUDA(cudaMalloc(&xweiD, X * sizeof(V)));
-  TRY_CUDA(cudaMalloc(&yoffD, (N + 1) * sizeof(O)));
+  TRY_CUDA(cudaMalloc(&yoffD, (N+1) * sizeof(O)));
   TRY_CUDA(cudaMalloc(&ydegD, N * sizeof(O)));
   TRY_CUDA(cudaMalloc(&yedgD, X * sizeof(K)));
   TRY_CUDA(cudaMalloc(&yweiD, X * sizeof(V)));
-  TRY_CUDA(cudaMalloc(&coffD, (N + 1) * sizeof(K)));
+  TRY_CUDA(cudaMalloc(&coffD, (N+1) * sizeof(K)));
   TRY_CUDA(cudaMalloc(&cdegD, N * sizeof(K)));
   TRY_CUDA(cudaMalloc(&cedgD, N * sizeof(K)));
   TRY_CUDA(cudaMalloc(&ncomD, 1 * sizeof(uint64_cu)));
   TRY_CUDA(cudaMalloc(&elD, 1 * sizeof(double)));
   // Partition vertices into low-degree and high-degree sets.
   vector<K> ks = vertexKeys(x);
-  size_t NL = louvainPartitionVerticesCudaU(ks, x);
+  size_t    NL = louvainPartitionVerticesCudaU(ks, x);
   // Obtain data for CSR.
   csrCreateOffsetsW(xoff, x, ks);
   csrCreateDegreesW(xdeg, x, ks);
@@ -1102,8 +1036,7 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
   csrCreateEdgeValuesW(xwei, x, ks);
   // Perform Louvain algorithm on device.
   float tm = 0, ti = 0, tp = 0, tl = 0, ta = 0; // Time spent in different phases
-  float t = measureDurationMarked([&](auto mark)
-                                  {
+  float  t = measureDurationMarked([&](auto mark) {
     size_t GN = N;
     double E  = coalesce(o.tolerance, 1e-2);
     auto   fc = [&](double el, int l) { return el<=E; };
@@ -1142,15 +1075,10 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
         if (p==1) t1 = timeNow();
         bool isFirst = p==0;
         int m = 0;
-
-        TRY_CUDA( cudaDeviceSynchronize() );
         tl += measureDuration([&]() {
           if (isFirst) m = louvainMoveCuU(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
           else         m = louvainMoveCuU(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
-        
-          TRY_CUDA( cudaDeviceSynchronize() );
         });
-        
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
         uint64_cu CN = 0;
@@ -1166,13 +1094,9 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
         else         louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
         if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), SCAN);
         else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), SCAN);
-
-        TRY_CUDA( cudaDeviceSynchronize() );
         ta += measureDuration([&]() {
           if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), SCAN);
           else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), SCAN);
-        
-        TRY_CUDA( cudaDeviceSynchronize() );
         });
         fillValueCuW(vtotD, size_t(CN), W());
         fillValueCuW(vaffD, size_t(CN), F(1));
@@ -1214,9 +1138,12 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
   TRY_CUDA(cudaFree(cedgD));
   TRY_CUDA(cudaFree(ncomD));
   TRY_CUDA(cudaFree(elD));
-  return LouvainResult<K, W>(ucom, utot, ctot, l, p, t, tm / o.repeat, ti / o.repeat, tp / o.repeat, tl / o.repeat, ta / o.repeat, countValueOmp(vaff, F(1)));
+  return LouvainResult<K, W>(ucom, utot, ctot, l, p, t, tm/o.repeat, ti/o.repeat, tp/o.repeat, tl/o.repeat, ta/o.repeat, countValueOmp(vaff, F(1)));
 }
 #pragma endregion
+
+
+
 
 #pragma region STATIC
 /**
@@ -1227,89 +1154,14 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
  * @returns louvain result
  */
 template <class FLAG = char, class G>
-inline auto louvainStaticCuda(const G &x, const LouvainOptions &o = {})
-{
+inline auto louvainStaticCuda(const G &x, const LouvainOptions &o={}) {
   using K = typename G::key_type;
-  auto fi = [&](auto &vcom, auto &vtot, auto &ctot)
-  {
+  auto fi = [&](auto &vcom, auto &vtot, auto &ctot) {
     louvainVertexWeightsW(vtot, x);
     louvainInitializeW(vcom, ctot, x, vtot);
   };
-  auto fm = [](auto &vaff)
-  {
-    fillValueOmpU(vaff, FLAG(1));
-  };
+  auto fm = [](auto &vaff) { fillValueOmpU(vaff, FLAG(1)); };
   return louvainInvokeCuda<false, FLAG>(x, o, fi, fm);
-}
-#pragma endregion
-
-#pragma region NAIVE-DYNAMIC APPROACH
-/**
- * Obtain the community membership of each vertex with Naive-dynamic Louvain.
- * @param y updated graph
- * @param deletions edge deletions for this batch update (undirected)
- * @param insertions edge insertions for this batch update (undirected)
- * @param q initial community each vertex belongs to
- * @param qvtot initial total edge weight of each vertex
- * @param qctot initial total edge weight of each community
- * @param o louvain options
- * @returns louvain result
- */
-template <class FLAG = char, class G, class K, class V, class W>
-inline auto louvainNaiveDynamicCuda(const G &y, const vector<tuple<K, K, V>> &deletions, const vector<tuple<K, K, V>> &insertions, const vector<K> &q, const vector<W> &qvtot, const vector<W> &qctot, const LouvainOptions &o = {})
-{
-  vector2d<K> qs;
-  vector2d<W> qvtots, qctots;
-  louvainSetupInitialsW(qs, qvtots, qctots, q, qvtot, qctot, o.repeat);
-  int r = 0;
-  auto fi = [&](auto &vcom, auto &vtot, auto &ctot)
-  {
-    vcom = move(qs[r]);
-    vtot = move(qvtots[r]);
-    ctot = move(qctots[r]);
-    ++r;
-    louvainUpdateWeightsFromOmpU(vtot, ctot, y, deletions, insertions, vcom);
-  };
-  auto fm = [](auto &vaff, const auto &vcom, const auto &vtot, const auto &ctot, auto &vcs, auto &vcout)
-  {
-    fillValueOmpU(vaff, FLAG(1));
-  };
-  return louvainInvokeCuda<true, FLAG>(y, o, fi, fm);
-}
-#pragma endregion
-
-#pragma region DYNAMIC FRONTIER APPROACH
-/**
- * Obtain the community membership of each vertex with Dynamic Frontier Louvain.
- * @param y updated graph
- * @param deletions edge deletions in batch update
- * @param insertions edge insertions in batch update
- * @param q initial community each vertex belongs to
- * @param qvtot initial total edge weight of each vertex
- * @param qctot initial total edge weight of each community
- * @param o louvain options
- * @returns louvain result
- */
-template <class FLAG = char, class G, class K, class V, class W>
-inline auto louvainDynamicFrontierCuda(const G &y, const vector<tuple<K, K, V>> &deletions, const vector<tuple<K, K, V>> &insertions, const vector<K> &q, const vector<W> &qvtot, const vector<W> &qctot, const LouvainOptions &o = {})
-{
-  vector2d<K> qs;
-  vector2d<W> qvtots, qctots;
-  louvainSetupInitialsW(qs, qvtots, qctots, q, qvtot, qctot, o.repeat);
-  int r = 0;
-  auto fi = [&](auto &vcom, auto &vtot, auto &ctot)
-  {
-    vcom = move(qs[r]);
-    vtot = move(qvtots[r]);
-    ctot = move(qctots[r]);
-    ++r;
-    louvainUpdateWeightsFromOmpU(vtot, ctot, y, deletions, insertions, vcom);
-  };
-  auto fm = [&](auto &vaff, auto &vcs, auto &vcout, const auto &vcom, const auto &vtot, const auto &ctot)
-  {
-    louvainAffectedVerticesFrontierOmpW(vaff, y, deletions, insertions, vcom);
-  };
-  return louvainInvokeCuda<true, FLAG>(y, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
