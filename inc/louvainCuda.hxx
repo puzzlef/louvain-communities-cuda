@@ -17,13 +17,14 @@ using std::partition;
 
 
 #pragma region DEGREE LIMITS
-#ifndef LOUVAIN_DEGREE_THREAD
-/** Degree limit for using thread-per-vertex kernel. */
-#define LOUVAIN_DEGREE_THREAD 32
-/** Degree limit for using shared memory with block-per-vertex kernel. */
-#define LOUVAIN_DEGREE_BLOCK_SHARED 128
+#ifndef LOUVAIN_BLIM_THREAD
+/** Number of threads per block for a thread-per-vertex kernel. */
+#define LOUVAIN_BLIM_THREAD 32
+/** Number of threads per block for a block-per-vertex kernel. */
+#define LOUVAIN_BLIM_BLOCK  128
 #endif
 #pragma endregion
+// NOTE: Use GRID_LIMIT_MAP_CUDA instead of GRID_LIMIT_CUDA?
 
 
 
@@ -31,21 +32,22 @@ using std::partition;
 #pragma region METHODS
 #pragma region INITIALIZE
 /**
- * Find the total edge weight of each vertex [kernel].
+ * Find the total edge weight of each vertex, using thread-per-vertex approach [kernel].
+ * @tparam SDEG switch-degree between thread- and block-per-vertex kernels
  * @param vtot total edge weight of each vertex (output)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xwei edge values of input graph
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int SDEG=128, class O, class K, class V, class W>
 void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
     size_t EO = xoff[u];
     size_t EN = xdeg[u];
-    if (EN >= LOUVAIN_DEGREE_THREAD) continue; // Skip high-degree vertices
+    if (EN >= SDEG) continue;  // Skip high-degree vertices
     W w = W();
     for (size_t i=0; i<EN; ++i)
       w += xwei[EO+i];
@@ -55,39 +57,41 @@ void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *
 
 
 /**
- * Find the total edge weight of each vertex.
+ * Find the total edge weight of each vertex, using thread-per-vertex approach.
+ * @tparam SDEG switch-degree between thread- and block-per-vertex kernels
  * @param vtot total edge weight of each vertex (output)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xwei edge values of input graph
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <class O, class K, class V, class W>
-inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE {
-  const int B = blockSizeCu(NE-NB, LOUVAIN_DEGREE_THREAD);
-  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainVertexWeightsThreadCukW<<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
+template <int SDEG=128, class O, class K, class V, class W>
+inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
+  const int B = blockSizeCu(NE-NB, LOUVAIN_BLIM_THREAD);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
+  louvainVertexWeightsThreadCukW<SDEG><<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
 }
 
 
 /**
- * Find the total edge weight of each vertex [kernel].
+ * Find the total edge weight of each vertex, using block-per-vertex approach [kernel].
+ * @tparam SDEG switch-degree between thread- and block-per-vertex kernels
  * @param vtot total edge weight of each vertex (output)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xwei edge values of input graph
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int SDEG=128, class O, class K, class V, class W>
 void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  __shared__ W cache[BLOCK_LIMIT_MAP_CUDA];
+  __shared__ W cache[LOUVAIN_BLIM_BLOCK];
   for (K u=NB+b; u<NE; u+=G) {
     size_t EO = xoff[u];
-    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
-    if (EN < LOUVAIN_DEGREE_THREAD) continue; // Skip low-degree vertices
+    size_t EN = xdeg[u];
+    if (EN < SDEG) continue;  // Skip low-degree vertices
     W w = W();
     for (size_t i=t; i<EN; i+=B)
       w += xwei[EO+i];
@@ -100,24 +104,25 @@ void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *x
 
 
 /**
- * Find the total edge weight of each vertex.
+ * Find the total edge weight of each vertex, using block-per-vertex approach.
+ * @tparam SDEG switch-degree between thread- and block-per-vertex kernels
  * @param vtot total edge weight of each vertex (output)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xwei edge values of input graph
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int SDEG=128, class O, class K, class V, class W>
 inline void louvainVertexWeightsBlockCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
-  const int B = blockSizeCu<true>(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu<true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainVertexWeightsBlockCukW<<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
+  const int B = blockSizeCu<true>(NE-NB, LOUVAIN_BLIM_BLOCK);
+  const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_CUDA);
+  louvainVertexWeightsBlockCukW<SDEG><<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
 }
 
 
 /**
- * Find the total edge weight of each community [kernel].
+ * Find the total edge weight of each community, using thread-per-vertex approach [kernel].
  * @param ctot total edge weight of each community (updated, must be initialized)
  * @param vcom community each vertex belongs to
  * @param vtot total edge weight of each vertex
@@ -136,7 +141,7 @@ void __global__ louvainCommunityWeightsCukU(W *ctot, const K *vcom, const W *vto
 
 
 /**
- * Find the total edge weight of each community.
+ * Find the total edge weight of each community, using thread-per-vertex approach.
  * @param ctot total edge weight of each community (updated, must be initialized)
  * @param vcom community each vertex belongs to
  * @param vtot total edge weight of each vertex
@@ -145,14 +150,14 @@ void __global__ louvainCommunityWeightsCukU(W *ctot, const K *vcom, const W *vto
  */
 template <class K, class W>
 inline void louvainCommunityWeightsCuU(W *ctot, const K *vcom, const W *vtot, K NB, K NE) {
-  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
+  const int B = blockSizeCu(NE-NB, LOUVAIN_BLIM_THREAD);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
   louvainCommunityWeightsCukU<<<G, B>>>(ctot, vcom, vtot, NB, NE);
 }
 
 
 /**
- * Initialize communities such that each vertex is its own community [kernel].
+ * Initialize communities such that each vertex is its own community, using thread-per-vertex approach [kernel].
  * @param vcom community each vertex belongs to (output)
  * @param ctot total edge weight of each community (output)
  * @param vtot total edge weight of each vertex
@@ -170,7 +175,7 @@ void __global__ louvainInitializeCukW(K *vcom, W *ctot, const W *vtot, K NB, K N
 
 
 /**
- * Initialize communities such that each vertex is its own community.
+ * Initialize communities such that each vertex is its own community, using thread-per-vertex approach.
  * @param vcom community each vertex belongs to (output)
  * @param ctot total edge weight of each community (output)
  * @param vtot total edge weight of each vertex
@@ -179,8 +184,8 @@ void __global__ louvainInitializeCukW(K *vcom, W *ctot, const W *vtot, K NB, K N
  */
 template <class K, class W>
 inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE) {
-  const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
+  const int B = blockSizeCu(NE-NB, LOUVAIN_BLIM_THREAD);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
   louvainInitializeCukW<<<G, B>>>(vcom, ctot, vtot, NB, NE);
 }
 #pragma endregion
@@ -193,29 +198,30 @@ inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE) {
  * Scan communities connected to a vertex [device function].
  * @tparam SELF include self-loops?
  * @tparam BLOCK called from a thread block?
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
  * @param hk hashtable keys (updated)
  * @param hv hashtable values (updated)
  * @param H capacity of hashtable (prime)
  * @param T secondary prime (>H)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param u given vertex
  * @param vcom community each vertex belongs to
  * @param i start index
  * @param DI index stride
  */
-template <bool SELF = false, bool BLOCK = false, class O, class K, class V, class W>
+template <bool SELF=false, bool BLOCK=false, int HTYPE=3, class O, class K, class V, class W>
 inline void __device__ louvainScanCommunitiesCudU(K *hk, W *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI) {
   size_t EO = xoff[u];
-  size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+  size_t EN = xdeg[u];
   for (; i<EN; i+=DI) {
     K v = xedg[EO+i];
     W w = xwei[EO+i];
     K c = vcom[v];
     if (!SELF && u==v) continue;
-    hashtableAccumulateCudU<BLOCK>(hk, hv, H, T, c+1, w);
+    hashtableAccumulateCudU<BLOCK, HTYPE>(hk, hv, H, T, c+1, w);
   }
 }
 
@@ -248,9 +254,9 @@ inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, W *hv, size_t 
 /**
  * Mark out-neighbors of a vertex as affected [device function].
  * @param vaff vertex affected flags (updated)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
  * @param u given vertex
  * @param i start index
  * @param DI index stride
@@ -258,10 +264,10 @@ inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, W *hv, size_t 
 template <class O, class K, class F>
 inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K *xdeg, const K *xedg, K u, size_t i, size_t DI) {
   size_t EO = xoff[u];
-  size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+  size_t EN = xdeg[u];
   for (; i<EN; i+=DI) {
     K v = xedg[EO+i];
-    vaff[v] = F(1); // TODO: Use two (synchronous) buffers?
+    vaff[v] = F(1);  // Use two (synchronous) buffers?
   }
 }
 #pragma endregion
@@ -272,16 +278,18 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
 #pragma region LOCAL-MOVING PHASE
 /**
  * Move each vertex to its best community, using thread-per-vertex approach [kernel].
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param el delta modularity of moving all vertices to their best communities (output)
  * @param vcom community each vertex belongs to (updated)
  * @param ctot total edge weight of each community (updated)
  * @param vaff vertex affected flags (updated)
  * @param bufk buffer for hashtable keys (updated)
  * @param bufw buffer for hashtable values (updated)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vtot total edge weight of each vertex
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
@@ -289,38 +297,37 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_THREAD, class O, class K, class V, class W, class F>
 void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
-  __shared__ double elb[LOUVAIN_DEGREE_THREAD];
-  const int MAX_DEGREE = LOUVAIN_DEGREE_THREAD;
-  K shrk[2*MAX_DEGREE];
-  W shrw[2*MAX_DEGREE];
+  __shared__ double elb[BLIM];
+  // const int DMAX = BLIM;
+  // K shrk[2*DMAX];
+  // W shrw[2*DMAX];
   elb[t] = 0;
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
     if (!vaff[u]) continue;
     // Scan communities connected to u.
     K d = vcom[u];
-    // size_t EO = xoff[u]
-    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
-    if (EN==0) continue;                       // Skip isolated vertices
-    if (EN >= LOUVAIN_DEGREE_THREAD) continue; // Skip high-degree vertices
+    size_t EO = xoff[u];
+    size_t EN = xdeg[u];
+    if (EN==0 || EN>=BLIM) continue;  // Skip isolated and high-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
-    size_t T = nextPow2Cud(H) - 1;
-    K *hk = shrk;  // bufk + 2*EO
-    W *hv = shrw;  // bufw + 2*EO
+    size_t T = nextPow2Cud(H)  - 1;
+    K *hk = bufk + 2*EO;
+    W *hv = bufw + 2*EO;
     hashtableClearCudW(hk, hv, H, 0, 1);
-    louvainScanCommunitiesCudU(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
+    louvainScanCommunitiesCudU<false, false, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     // Calculate delta modularity of moving u to each community.
-    W vdout = hashtableGetCud(hk, hv, H, T, d+1);
+    W vdout = hashtableGetCud(hk, hv, H, T, d+1);  // NOTE: Can be optimized
     louvainCalculateDeltaModularityCudU(hk, hv, H, d, ctot, vdout, vtot[u], ctot[d], M, R, 0, 1);
     // Find best community for u.
     hashtableMaxCudU(hk, hv, H, 0, 1);
-    vaff[u] = F();               // Mark u as unaffected (TODO: Use two buffers?)
+    vaff[u] = F();               // Mark u as unaffected (Use two buffers?)
     if (hv[0] <= W()) continue;  // No good community found
     K c = hk[0] - 1;             // Best community
     if (c==d) continue;
-    if (PICKLESS && c>d) continue; // Pick smaller community-id (to avoid community swaps)
+    if (PICKLESS && c>d) continue;  // Pick smaller community-id (to avoid community swaps)
     // Change community of u.
     atomicAdd(&ctot[d], -vtot[u]);
     atomicAdd(&ctot[c],  vtot[u]);
@@ -337,16 +344,18 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
 
 /**
  * Move each vertex to its best community, using block-per-vertex approach.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param el delta modularity of moving all vertices to their best communities (output)
  * @param vcom community each vertex belongs to (updated)
  * @param ctot total edge weight of each community (updated)
  * @param vaff vertex affected flags (updated)
  * @param bufk buffer for hashtable keys (updated)
  * @param bufw buffer for hashtable values (updated)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vtot total edge weight of each vertex
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
@@ -354,26 +363,28 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_THREAD, class O, class K, class V, class W, class F>
 inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
-  const int B = blockSizeCu(NE-NB, LOUVAIN_DEGREE_THREAD);
-  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainMoveThreadCukU<<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
+  const int B = blockSizeCu(NE-NB, BLIM);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
+  louvainMoveThreadCukU<HTYPE, BLIM><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
 }
 
 
 /**
  * Move each vertex to its best community, using block-per-vertex approach [kernel].
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param el delta modularity of moving all vertices to their best communities (output)
  * @param vcom community each vertex belongs to (updated)
  * @param ctot total edge weight of each community (updated)
  * @param vaff vertex affected flags (updated)
  * @param bufk buffer for hashtable keys (updated)
  * @param bufw buffer for hashtable values (updated)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vtot total edge weight of each vertex
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
@@ -381,36 +392,34 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_BLOCK, class O, class K, class V, class W, class F>
 void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
-  const int MAX_DEGREE = LOUVAIN_DEGREE_BLOCK_SHARED;
-  __shared__ K shrk[2*MAX_DEGREE];
-  __shared__ W shrw[2*MAX_DEGREE];
+  // const int DMAX = BLIM;
+  // __shared__ K shrk[2*DMAX];
+  // __shared__ W shrw[2*DMAX];
   __shared__ double elb;
-  __shared__ bool vaffu;
+  __shared__ bool vaffb;
   __shared__ K d;
   __shared__ W vdout;
   if (t==0) elb = 0;
   for (K u=NB+b; u<NE; u+=G) {
-    __syncthreads();
-    if (t==0) vaffu = vaff[u];
+    if (t==0) vaffb = vaff[u];
     if (t==0) d = vcom[u];
     __syncthreads();
-    if (!vaffu) continue;
+    if (!vaffb) continue;
+    // if (!vaff[u]) continue;
     // Scan communities connected to u.
     size_t EO = xoff[u];
-    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
-    if (EN==0) continue;                       // Skip isolated vertices
-    if (EN < LOUVAIN_DEGREE_THREAD) continue;  // Skip low-degree vertices
+    size_t EN = xdeg[u];
+    if (EN==0 || EN < BLIM) continue;  // Skip isolated and low-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
-    size_t T = nextPow2Cud(H) - 1;
-    K *hk = EN <= MAX_DEGREE? shrk : bufk + 2*EO;
-    W *hv = EN <= MAX_DEGREE? shrw : bufw + 2*EO;
-    __syncthreads();
+    size_t T = nextPow2Cud(H)  - 1;
+    K *hk = bufk + 2*EO;  // EN <= DMAX? shrk : bufk + 2*EO;
+    W *hv = bufw + 2*EO;  // EN <= DMAX? shrw : bufw + 2*EO;
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
-    louvainScanCommunitiesCudU<false, true>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
+    louvainScanCommunitiesCudU<false, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     __syncthreads();
     // Calculate delta modularity of moving u to each community.
     if (t==0) vdout = hashtableGetCud(hk, hv, H, T, d+1);
@@ -420,11 +429,11 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     // Find best community for u.
     hashtableMaxCudU<true>(hk, hv, H, t, B);
     __syncthreads();
-    if (t==0) vaff[u] = F();               // Mark u as unaffected (TODO: Use two buffers?)
-    if (!hk[0] || hv[0] <= W()) continue;  // No good community found (TODO: Cache hk[0], hv[0]?)
-    K c = hk[0] - 1; // Best community
+    if (t==0) vaff[u] = F();               // Mark u as unaffected (Use two buffers?)
+    if (!hk[0] || hv[0] <= W()) continue;  // No good community found (Cache hk[0], hv[0]?)
+    K c = hk[0] - 1;                       // Best community
     if (c==d) continue;
-    if (PICKLESS && c>d) continue; // Pick smaller community-id (to avoid community swaps)
+    if (PICKLESS && c>d) continue;  // Pick smaller community-id (to avoid community swaps)
     // Change community of u.
     if (t==0) atomicAdd(&ctot[d], -vtot[u]);
     if (t==0) atomicAdd(&ctot[c],  vtot[u]);
@@ -439,16 +448,18 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
 
 /**
  * Move each vertex to its best community, using block-per-vertex approach.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param el delta modularity of moving all vertices to their best communities (output)
  * @param vcom community each vertex belongs to (updated)
  * @param ctot total edge weight of each community (updated)
  * @param vaff vertex affected flags (updated)
  * @param bufk buffer for hashtable keys (updated)
  * @param bufw buffer for hashtable values (updated)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vtot total edge weight of each vertex
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
@@ -456,46 +467,48 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_BLOCK, class O, class K, class V, class W, class F>
 inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
-  const int B = blockSizeCu<true>(NE-NB, LOUVAIN_DEGREE_BLOCK_SHARED);
-  const int G = gridSizeCu<true> (NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainMoveBlockCukU<<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
+  const int B = blockSizeCu<true>(NE-NB, BLIM);
+  const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_CUDA);
+  louvainMoveBlockCukU<HTYPE, BLIM><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
 }
 
 
 /**
  * Louvain algorithm's local moving phase
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
  * @param el delta modularity of moving all vertices to their best communities (output)
  * @param vcom community each vertex belongs to (updated)
  * @param ctot total edge weight of each community (updated)
  * @param vaff vertex affected flags (updated)
  * @param bufk buffer for hashtable keys (updated)
  * @param bufw buffer for hashtable values (updated)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vtot total edge weight of each vertex
+ * @param N Total number of vertices
+ * @param NL number of vertices with low degree
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
  * @param L max interations
- * @param N Total number of vertices
- * @param NL number of vertices with low degree
  * @param fc has local moving phase converged?
+ * @returns number of iterations performed
  */
-template <class O, class K, class V, class W, class F, class FC>
-inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
+template <int HTYPE=3, class O, class K, class V, class W, class F, class FC>
+inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, K N, K NL, W M, W R, int L, FC fc) {
   int l = 0;
   double elH = 0;
   const int PICKSTEP = 4;
-  while (l < L) {
-    bool PICKLESS = (l + PICKSTEP / 2) % PICKSTEP == 0;
+  while (l<L) {
+    bool PICKLESS = l % PICKSTEP == 0;  // (l + PICKSTEP / 2) % PICKSTEP == 0;
     fillValueCuW(el, 1, 0.0);
-    louvainMoveThreadCuU(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
-    louvainMoveBlockCuU (el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
-    TRY_CUDA(cudaMemcpy(&elH, el, sizeof(double), cudaMemcpyDeviceToHost));
-    if (fc(elH, l++)) break;
+    louvainMoveThreadCuU<HTYPE>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
+    louvainMoveBlockCuU <HTYPE>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
+    TRY_CUDA( cudaMemcpy(&elH, el, sizeof(double), cudaMemcpyDeviceToHost) ); ++l;
+    if (!PICKLESS && fc(elH, l)) break;
   }
   return l > 1 || elH ? l : 0;
 }
@@ -506,7 +519,7 @@ inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *buf
 
 #pragma region COMMUNITY PROPERTIES
 /**
- * Examine if each community exists [kernel].
+ * Examine if each community exists, using thread-per-vertex approach [kernel].
  * @param C number of communities (updated, must be initialized)
  * @param a does each community exist (updated, must be initialized)
  * @param vcom community each vertex belongs to
@@ -521,8 +534,7 @@ void __global__ louvainCommunityExistsCukU(uint64_cu *C, A *a, const K *vcom, K 
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
     K c = vcom[u];
     if (a[c]) continue;
-    if (atomicCAS(&a[c], uint64_cu(), uint64_cu(1)) == uint64_cu()) ++CB[t];
-    // CHECK: Too many atomic ops.?
+    if (atomicCAS(&a[c], uint64_cu(), uint64_cu(1)) == uint64_cu()) ++CB[t];  // Too many atomic ops.?
   }
   __syncthreads();
   sumValuesBlockReduceCudU(CB, B, t);
@@ -531,7 +543,7 @@ void __global__ louvainCommunityExistsCukU(uint64_cu *C, A *a, const K *vcom, K 
 
 
 /**
- * Examine if each community exists.
+ * Examine if each community exists, using thread-per-vertex approach.
  * @param C number of communities (updated, must be initialized)
  * @param a does each community exist (updated, must be initialized)
  * @param vcom community each vertex belongs to
@@ -541,15 +553,15 @@ void __global__ louvainCommunityExistsCukU(uint64_cu *C, A *a, const K *vcom, K 
 template <class K, class A>
 inline void louvainCommunityExistsCuU(uint64_cu *C, A *a, const K *vcom, K NB, K NE) {
   const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
   louvainCommunityExistsCukU<<<G, B>>>(C, a, vcom, NB, NE);
 }
 
 
 /**
- * Find the total degree of each community [kernel].
+ * Find the total degree of each community, using thread-per-vertex approach [kernel].
  * @param a total degree of each community (updated, must be initialized)
- * @param xdeg degrees of original graph
+ * @param xdeg degrees of input graph
  * @param vcom community each vertex belongs to
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
@@ -558,18 +570,17 @@ template <class K, class A>
 void __global__ louvainCommunityTotalDegreeCukU(A *a, const K *xdeg, const K *vcom, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
-    size_t EN = xdeg[u];  // xoff[u+1] - xoff[u]
+    size_t EN = xdeg[u];
     K c = vcom[u];
-    atomicAdd(&a[c], A(EN));
-    // CHECK: Too many atomic ops.?
+    atomicAdd(&a[c], A(EN));  // Too many atomic ops.?
   }
 }
 
 
 /**
- * Find the total degree of each community.
+ * Find the total degree of each community, using thread-per-vertex approach.
  * @param a total degree of each community (updated, must be initialized)
- * @param xdeg offsets of original graph
+ * @param xdeg offsets of input graph
  * @param vcom community each vertex belongs to
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
@@ -577,13 +588,13 @@ void __global__ louvainCommunityTotalDegreeCukU(A *a, const K *xdeg, const K *vc
 template <class K, class A>
 inline void louvainCommunityTotalDegreeCuU(A *a, const K *xdeg, const K *vcom, K NB, K NE) {
   const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu(NE-NB, B, GRID_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
   louvainCommunityTotalDegreeCukU<<<G, B>>>(a, xdeg, vcom, NB, NE);
 }
 
 
 /**
- * Find the number of vertices in each community [kernel].
+ * Find the number of vertices in each community, using thread-per-vertex approach [kernel].
  * @param a number of vertices belonging to each community (updated, must be initialized)
  * @param vcom community each vertex belongs to
  * @param NB begin vertex (inclusive)
@@ -594,14 +605,13 @@ void __global__ louvainCountCommunityVerticesCukU(A *a, const K *vcom, K NB, K N
   DEFINE_CUDA(t, b, B, G);
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
     K c = vcom[u];
-    atomicAdd(&a[c], A(1));
-    // CHECK: Too many atomic ops.?
+    atomicAdd(&a[c], A(1));  // Too many atomic ops.?
   }
 }
 
 
 /**
- * Find the number of vertices in each community.
+ * Find the number of vertices in each community, using thread-per-vertex approach.
  * @param a number of vertices belonging to each community (updated, must be initialized)
  * @param vcom community each vertex belongs to
  * @param NB begin vertex (inclusive)
@@ -616,7 +626,7 @@ inline void louvainCountCommunityVerticesCuU(A *a, const K *vcom, K NB, K NE) {
 
 
 /**
- * Populate community vertices into a CSR structure.
+ * Populate community vertices into a CSR structure, using thread-per-vertex approach [kernel].
  * @param cdeg number of vertices in each community (updated)
  * @param cedg vertices in each community (updates)
  * @param coff offsets of vertices in each community
@@ -637,7 +647,7 @@ void __global__ louvainPopulateCommunityVerticesCukU(K *cdeg, K *cedg, const K *
 
 
 /**
- * Populate community vertices into a CSR structure.
+ * Populate community vertices into a CSR structure, using thread-per-vertex approach.
  * @param cdeg number of vertices in each community (updated)
  * @param cedg vertices in each community (updated)
  * @param coff offsets of vertices in each community
@@ -648,7 +658,7 @@ void __global__ louvainPopulateCommunityVerticesCukU(K *cdeg, K *cedg, const K *
 template <class K>
 inline void louvainPopulateCommunityVerticesCuU(K *cdeg, K *cedg, const K *coff, const K *vcom, K NB, K NE) {
   const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
   louvainPopulateCommunityVerticesCukU<<<G, B>>>(cdeg, cedg, coff, vcom, NB, NE);
 }
 
@@ -662,14 +672,14 @@ inline void louvainPopulateCommunityVerticesCuU(K *cdeg, K *cedg, const K *coff,
  * @param vcom community each vertex belongs to
  * @param N number of vertices
  * @param C number of communities
- * @param SCAN size of buffer for exclusive scan
  */
 template <class K>
-inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, const K *vcom, K N, K C, size_t SCAN) {
+inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, const K *vcom, K N, K C) {
+  size_t B = max(N+1, K(BLOCK_LIMIT_CUDA));
   fillValueCuW(cdeg, C, K());
   fillValueCuW(coff, C+1, K());
   louvainCountCommunityVerticesCuU(coff, vcom, K(), N);
-  exclusiveScanCubW(coff, bufk, coff, C+1, SCAN);
+  exclusiveScanCubW(coff, bufk, coff, C+1, B);
   louvainPopulateCommunityVerticesCuU(cdeg, cedg, coff, vcom, K(), N);
 }
 #pragma endregion
@@ -679,7 +689,7 @@ inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, cons
 
 #pragma region LOOKUP COMMUNITIES
 /**
- * Update community membership in a tree-like fashion (to handle aggregation) [kernel].
+ * Update community membership in a tree-like fashion (to handle aggregation), using thread-per-vertex approach [kernel].
  * @param a output community each vertex belongs to (updated)
  * @param vcom community each vertex belongs to (at this aggregation level)
  * @param NB begin vertex (inclusive)
@@ -693,7 +703,7 @@ void __global__ louvainLookupCommunitiesCukU(K *a, const K *vcom, K NB, K NE) {
 }
 
 /**
- * Update community membership in a tree-like fashion (to handle aggregation).
+ * Update community membership in a tree-like fashion (to handle aggregation), using thread-per-vertex approach.
  * @param a output community each vertex belongs to (updated)
  * @param vcom community each vertex belongs to (at this aggregation level)
  * @param NB begin vertex (inclusive)
@@ -702,7 +712,7 @@ void __global__ louvainLookupCommunitiesCukU(K *a, const K *vcom, K NB, K NE) {
 template <class K>
 inline void louvainLookupCommunitiesCuU(K *a, const K *vcom, K NB, K NE) {
   const int B = blockSizeCu(NE-NB, BLOCK_LIMIT_MAP_CUDA);
-  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
+  const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_CUDA);
   louvainLookupCommunitiesCukU<<<G, B>>>(a, vcom, NB, NE);
 }
 #pragma endregion
@@ -717,26 +727,28 @@ inline void louvainLookupCommunitiesCuU(K *a, const K *vcom, K NB, K NE) {
  * @param cext does each community exist (updated)
  * @param bufk buffer for exclusive scan (scratch)
  * @param N number of vertices
- * @param SCAN size of buffer for exclusive scan
  */
 template <class K>
-inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t SCAN) {
-  exclusiveScanCubW(cext, bufk, cext, N, SCAN);
+inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N) {
+  size_t B = max(N+1, K(BLOCK_LIMIT_CUDA));
+  exclusiveScanCubW(cext, bufk, cext, N, B);
   louvainLookupCommunitiesCuU(vcom, cext, K(), N);
 }
 
 
 /**
- * Aggregate outgoing edges of each community [kernel].
+ * Aggregate outgoing edges of each community, using thread-per-community approach [kernel].
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param ydeg degrees of aggregated graph (updated)
  * @param yedg edge keys of aggregated graph (updated)
  * @param ywei edge values of aggregated graph (updated)
  * @param bufk buffer to store keys of hashtable (scratch)
  * @param bufw buffer to store values of hashtable (scratch)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vcom community each vertex belongs to
  * @param coff offsets of vertices in each community
  * @param cedg vertices in each community
@@ -744,28 +756,27 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_THREAD, class O, class K, class V, class W>
 void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
-  const int MAX_DEGREE = LOUVAIN_DEGREE_THREAD;
-  K shrk[2*MAX_DEGREE];
-  W shrw[2*MAX_DEGREE];
+  // const int DMAX = BLIM;
+  // K shrk[2*DMAX];
+  // W shrw[2*DMAX];
   for (K c=CB+B*b+t; c<CE; c+=G*B) {
     size_t EO = yoff[c];
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
-    if (CN==0) continue;                       // Skip empty communities
-    if (EN >= LOUVAIN_DEGREE_THREAD) continue; // Skip communities with large total degree
+    if (CN==0 || EN >= BLIM) continue;  // Skip empty communities, and communities with high total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
-    K *hk = shrk;  // bufk + 2*EO
-    W *hv = shrw;  // bufw + 2*EO
+    K *hk = bufk + 2*EO;
+    W *hv = bufw + 2*EO;
     // Get edges from community c into hashtable.
     hashtableClearCudW(hk, hv, H, 0, 1);
     for (size_t i=0; i<CN; ++i) {
       K u = cedg[CO+i];
-      louvainScanCommunitiesCudU<true>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
+      louvainScanCommunitiesCudU<true, false, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     }
     // Store edges from hashtable into aggregated graph.
     for (size_t i=0; i<H; ++i) {
@@ -781,16 +792,18 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
 
 
 /**
- * Aggregate outgoing edges of each community.
+ * Aggregate outgoing edges of each community, using thread-per-community approach.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param ydeg degrees of aggregated graph (updated)
  * @param yedg edge keys of aggregated graph (updated)
  * @param ywei edge values of aggregated graph (updated)
  * @param bufk buffer to store keys of hashtable (scratch)
  * @param bufw buffer to store values of hashtable (scratch)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vcom community each vertex belongs to
  * @param coff offsets of vertices in each community
  * @param cedg vertices in each community
@@ -798,25 +811,27 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_THREAD, class O, class K, class V, class W>
 inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
-  const int B = blockSizeCu(CE-CB, LOUVAIN_DEGREE_THREAD);
-  const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_MAP_CUDA);
-  louvainAggregateEdgesThreadCukU<<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
+  const int B = blockSizeCu(CE-CB, BLIM);
+  const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_CUDA);
+  louvainAggregateEdgesThreadCukU<HTYPE, BLIM><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
 
 
 /**
- * Aggregate outgoing edges of each community [kernel].
+ * Aggregate outgoing edges of each community, using block-per-community approach [kernel].
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param ydeg degrees of aggregated graph (updated)
  * @param yedg edge keys of aggregated graph (updated)
  * @param ywei edge values of aggregated graph (updated)
  * @param bufk buffer to store keys of hashtable (scratch)
  * @param bufw buffer to store values of hashtable (scratch)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vcom community each vertex belongs to
  * @param coff offsets of vertices in each community
  * @param cedg vertices in each community
@@ -824,7 +839,7 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_BLOCK, class O, class K, class V, class W>
 void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   for (K c=CB+b; c<CE; c+=G) {
@@ -833,19 +848,17 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
-    if (CN==0) continue;                      // Skip empty communities
-    if (EN < LOUVAIN_DEGREE_THREAD) continue; // Skip communities with small total degree
+    if (CN==0 || EN < BLIM) continue;  // Skip empty communities and communities with small total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;
     W *hv = bufw + 2*EO;
     // Get edges from community c into hashtable.
-    __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
     for (size_t i=0; i<CN; ++i) {
       K u = cedg[CO+i];
-      louvainScanCommunitiesCudU<true, true>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
+      louvainScanCommunitiesCudU<true, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     }
     // Store edges from hashtable into aggregated graph.
     __syncthreads();
@@ -862,16 +875,18 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
 
 
 /**
- * Aggregate outgoing edges of each community.
+ * Aggregate outgoing edges of each community, using block-per-community approach.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam BLIM maximum number of threads per block
  * @param ydeg degrees of aggregated graph (updated)
  * @param yedg edge keys of aggregated graph (updated)
  * @param ywei edge values of aggregated graph (updated)
  * @param bufk buffer to store keys of hashtable (scratch)
  * @param bufw buffer to store values of hashtable (scratch)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vcom community each vertex belongs to
  * @param coff offsets of vertices in each community
  * @param cedg vertices in each community
@@ -879,10 +894,10 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_BLOCK, class O, class K, class V, class W>
 inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
-  const int B = blockSizeCu<true>(CE-CB, 4*LOUVAIN_DEGREE_BLOCK_SHARED);
-  const int G = gridSizeCu<true> (CE-CB, B, GRID_LIMIT_MAP_CUDA);
+  const int B = blockSizeCu<true>(CE-CB, BLIM);  // Why 4*BLIM?
+  const int G = gridSizeCu <true>(CE-CB, B, GRID_LIMIT_CUDA);
   louvainAggregateEdgesBlockCukU<<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
 
@@ -896,25 +911,25 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W 
  * @param bufo buffer for exclusive scan of size |V| (scratch)
  * @param bufk buffer to store keys of hashtable (scratch)
  * @param bufw buffer to store values of hashtable (scratch)
- * @param xoff offsets of original graph
- * @param xdeg degrees of original graph
- * @param xedg edge keys of original graph
- * @param xwei edge values of original graph
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
  * @param vcom community each vertex belongs to
  * @param coff offsets of vertices in each community
  * @param cedg vertices in each community
- * @param N number of vertices in original graph
+ * @param N number of vertices in input graph
  * @param C number of communities
- * @param SCAN size of buffer for exclusive scan
  */
 template <class O, class K, class V, class W>
-inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t SCAN) {
+inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C) {
+  size_t B = max(N+1, K(BLOCK_LIMIT_CUDA));
   fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
   louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
-  exclusiveScanCubW(yoff, bufo, yoff, C+1, SCAN);
+  exclusiveScanCubW(yoff, bufo, yoff, C+1, B);
   louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-  louvainAggregateEdgesBlockCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesBlockCuU (ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
 }
 #pragma endregion
 
@@ -925,11 +940,11 @@ inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *
 /**
  * Partition vertices into low-degree and high-degree sets.
  * @param ks vertex keys (updated)
- * @param x original graph
+ * @param x input graph
  * @returns number of low-degree vertices
  */
 template <class G, class K>
-inline size_t louvainPartitionVerticesCudaU(vector<K> &ks, const G &x) {
+inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
   K SWITCH_DEGREE = 64;  // Switch to block-per-vertex approach if degree >= SWITCH_DEGREE
   K SWITCH_LIMIT  = 64;  // Avoid switching if number of vertices < SWITCH_LIMIT
   size_t N = ks.size();
@@ -949,122 +964,108 @@ inline size_t louvainPartitionVerticesCudaU(vector<K> &ks, const G &x) {
 #pragma region ENVIRONMENT SETUP
 /**
  * Setup and perform the Louvain algorithm.
- * @param x original graph
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam HWEIGHT hashtable weight type
+ * @param x input graph
  * @param o louvain options
- * @param fi initializing community membership and total vertex/community weights (vcom, vtot, ctot)
- * @param fm marking affected vertices (vaff)
+ * @param fi initializing community membership and total vertex/community weights (vcom, vtot, ctot, xoff, xdeg, xedg, xwei, NL)
+ * @param fm marking affected vertices (vaff, xoff, xdeg, xedg, xwei, NL)
  * @returns louvain result
  */
-template <bool DYNAMIC = false, class FLAG = char, class G, class FI, class FM>
-inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm) {
+template <int HTYPE=3, class HWEIGHT=float, class G, class FI, class FM>
+inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
+  using O = uint32_t;
   using K = typename G::key_type;
   using V = typename G::edge_value_type;
   using W = LOUVAIN_WEIGHT_TYPE;
-  using F = FLAG;
-  using O = uint32_t;
+  using F = char;
   // Get graph properties.
   size_t X = x.size();
   size_t S = x.span();
   size_t N = x.order();
+  size_t B = max(N+1, size_t(BLOCK_LIMIT_CUDA));
   double M = edgeWeightOmp(x) / 2;
-  size_t SCAN = max(N, size_t(1024));
   // Options.
-  double R = coalesce(o.resolution, 1.0);
-  int L = coalesce(o.maxIterations, 10), l = 0;
-  int P = coalesce(o.maxPasses, 5), p = 0;
-  double EDROP = coalesce(o.toleranceDrop, 10.0);
-  double EAGGR = coalesce(o.aggregationTolerance, min(max(1 - 0.025 * X / N, 0.1), 0.9));
+  double R = o.resolution;            // 1
+  int    L = o.maxIterations, l = 0;  // 10
+  int    P = o.maxPasses, p = 0;      // 5
   // Allocate buffers on host, original and compressed.
-  int T = omp_get_max_threads();
-  vector<F> vaff(S), vaffc(N); // Affected vertex flag (any pass)
-  vector<K> ucom, ucomc(N);    // Community membership (first pass)
-  vector<W> utot, utotc(N);    // Total vertex weights (first pass)
-  vector<W> ctot, ctotc(N);    // Total community weights (first pass)
-  vector<O> xoff(N + 1);       // Offsets of original graph
-  vector<K> xdeg(N);           // Degrees of original graph
-  vector<K> xedg(X);           // Edge keys of original graph
-  vector<V> xwei(X);           // Edge values of original graph
-  if (!DYNAMIC) ucom.resize(S);
-  if (!DYNAMIC) utot.resize(S);
-  if (!DYNAMIC) ctot.resize(S);
+  vector<K> ucom(S), ucomc(N);  // Community membership (first pass)
+  vector<W> utot;       // Total vertex weights (first pass)
+  vector<W> ctot;       // Total community weights (first pass)
+  vector<O> xoff(N+1);  // Offsets of input graph
+  vector<K> xdeg(N);    // Degrees of input graph
+  vector<K> xedg(X);    // Edge keys of input graph
+  vector<V> xwei(X);    // Edge values of input graph
   // Allocate buffers on device.
-  F *vaffD = nullptr;
-  K *ucomD = nullptr, *vcomD = nullptr;
-  W *vtotD = nullptr;
-  W *ctotD = nullptr;
-  O *bufoD = nullptr;
-  K *bufkD = nullptr;
-  W *bufwD = nullptr;
-  O *xoffD = nullptr, *yoffD = nullptr;
-  K *xdegD = nullptr, *ydegD = nullptr;
-  K *xedgD = nullptr, *yedgD = nullptr;
-  V *xweiD = nullptr, *yweiD = nullptr;
-  O *coffD = nullptr;
-  K *cdegD = nullptr;
-  K *cedgD = nullptr;
-  uint64_cu *ncomD = nullptr;
-  double *elD = nullptr;
-  TRY_CUDA(cudaSetDeviceFlags(cudaDeviceMapHost));
-  TRY_CUDA(cudaMalloc(&vaffD, N * sizeof(F)));
-  TRY_CUDA(cudaMalloc(&ucomD, N * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&vcomD, N * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&vtotD, N * sizeof(W)));
-  TRY_CUDA(cudaMalloc(&ctotD, N * sizeof(W)));
-  TRY_CUDA(cudaMalloc(&bufoD, N * sizeof(O)));
-  TRY_CUDA(cudaMalloc(&bufkD, (2*X) * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&bufwD, (2*X) * sizeof(W)));
-  TRY_CUDA(cudaMalloc(&xoffD, (N+1) * sizeof(O)));
-  TRY_CUDA(cudaMalloc(&xdegD, N * sizeof(O)));
-  TRY_CUDA(cudaMalloc(&xedgD, X * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&xweiD, X * sizeof(V)));
-  TRY_CUDA(cudaMalloc(&yoffD, (N+1) * sizeof(O)));
-  TRY_CUDA(cudaMalloc(&ydegD, N * sizeof(O)));
-  TRY_CUDA(cudaMalloc(&yedgD, X * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&yweiD, X * sizeof(V)));
-  TRY_CUDA(cudaMalloc(&coffD, (N+1) * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&cdegD, N * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&cedgD, N * sizeof(K)));
-  TRY_CUDA(cudaMalloc(&ncomD, 1 * sizeof(uint64_cu)));
-  TRY_CUDA(cudaMalloc(&elD, 1 * sizeof(double)));
+  F *vaffD = nullptr;  // Affected vertex flag
+  K *ucomD = nullptr, *vcomD = nullptr;  // Community membership (first and subsequent passes)
+  W *vtotD = nullptr;  // Total vertex weights
+  W *ctotD = nullptr;  // Total community weights
+  O *bufoD = nullptr;  // Buffer for exclusive scan
+  K *bufkD = nullptr;  // Keys of hashtable
+  W *bufwD = nullptr;  // Values of hashtable
+  O *xoffD = nullptr, *yoffD = nullptr;  // Offsets of input and aggregated graphs
+  K *xdegD = nullptr, *ydegD = nullptr;  // Degrees of input and aggregated graphs
+  K *xedgD = nullptr, *yedgD = nullptr;  // Edge keys of input and aggregated graphs
+  V *xweiD = nullptr, *yweiD = nullptr;  // Edge values of input and aggregated graphs
+  O *coffD = nullptr;  // Offsets of vertices in each community
+  K *cdegD = nullptr;  // Number of vertices in each community
+  K *cedgD = nullptr;  // Vertices in each community
+  uint64_cu *ncomD = nullptr;  // Number of communities
+  double    *elD   = nullptr;  // Delta modularity per iteration
   // Partition vertices into low-degree and high-degree sets.
   vector<K> ks = vertexKeys(x);
   size_t    NL = louvainPartitionVerticesCudaU(ks, x);
   // Obtain data for CSR.
-  csrCreateOffsetsW(xoff, x, ks);
-  csrCreateDegreesW(xdeg, x, ks);
+  csrCreateOffsetsW (xoff, x, ks);
+  csrCreateDegreesW (xdeg, x, ks);
   csrCreateEdgeKeysW(xedg, x, ks);
   csrCreateEdgeValuesW(xwei, x, ks);
+  // Allocate device memory.
+  TRY_CUDA( cudaSetDeviceFlags(cudaDeviceMapHost) );
+  TRY_CUDA( cudaMalloc(&vaffD,  N    * sizeof(F)) );
+  TRY_CUDA( cudaMalloc(&ucomD,  N    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&vcomD,  N    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&vtotD,  N    * sizeof(W)) );
+  TRY_CUDA( cudaMalloc(&ctotD,  N    * sizeof(W)) );
+  TRY_CUDA( cudaMalloc(&bufoD,  B    * sizeof(O)) );
+  TRY_CUDA( cudaMalloc(&bufkD, (2*X) * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&bufwD, (2*X) * sizeof(W)) );
+  TRY_CUDA( cudaMalloc(&xoffD, (N+1) * sizeof(O)) );
+  TRY_CUDA( cudaMalloc(&xdegD,  N    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&xedgD,  X    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&xweiD,  X    * sizeof(V)) );
+  TRY_CUDA( cudaMalloc(&yoffD, (N+1) * sizeof(O)) );
+  TRY_CUDA( cudaMalloc(&ydegD,  N    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&yedgD,  X    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&yweiD,  X    * sizeof(V)) );
+  TRY_CUDA( cudaMalloc(&coffD, (N+1) * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&cdegD,  N    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&cedgD,  N    * sizeof(K)) );
+  TRY_CUDA( cudaMalloc(&ncomD,  1    * sizeof(uint64_cu)) );
+  TRY_CUDA( cudaMalloc(&elD,    1    * sizeof(double)) );
   // Perform Louvain algorithm on device.
   float tm = 0, ti = 0, tp = 0, tl = 0, ta = 0; // Time spent in different phases
   float  t = measureDurationMarked([&](auto mark) {
     size_t GN = N;
-    double E  = coalesce(o.tolerance, 1e-2);
+    double  E = o.tolerance;
     auto   fc = [&](double el, int l) { return el<=E; };
     // Reset buffers, in case of multiple runs.
-    fillValueOmpU(vaff, F());
-    fillValueOmpU(ucom, K());
-    fillValueOmpU(utot, W());
-    fillValueOmpU(ctot, W());
     fillValueCuW(vaffD, N, F());
     fillValueCuW(ucomD, N, K());
     fillValueCuW(vcomD, N, K());
     fillValueCuW(vtotD, N, W());
     fillValueCuW(ctotD, N, W());
-    // Copy original graph to device
+    // Copy input graph to device
     TRY_CUDA( cudaMemcpy(xoffD, xoff.data(), (N+1) * sizeof(O), cudaMemcpyHostToDevice) );
     TRY_CUDA( cudaMemcpy(xdegD, xdeg.data(),  N    * sizeof(K), cudaMemcpyHostToDevice) );
     TRY_CUDA( cudaMemcpy(xedgD, xedg.data(),  X    * sizeof(K), cudaMemcpyHostToDevice) );
     TRY_CUDA( cudaMemcpy(xweiD, xwei.data(),  X    * sizeof(V), cudaMemcpyHostToDevice) );
     // Initialize community membership and total vertex/community weights.
-    ti += mark([&]() {
-      louvainVertexWeightsThreadCuW(vtotD, xoffD, xdegD, xweiD, K(), K(N));
-      louvainVertexWeightsBlockCuW (vtotD, xoffD, xdegD, xweiD, K(), K(N));
-      louvainInitializeCuW(ucomD, ctotD, vtotD, K(), K(N));
-    });
+    ti += mark([&]() { fi(ucomD, vtotD, ctotD, xoffD, xdegD, xedgD, xweiD, N, NL); });
     // Mark affected vertices.
-    tm += mark([&]() { fm(vaff); });
-    gatherValuesOmpW(vaffc, vaff, ks);
-    TRY_CUDA( cudaMemcpy(vaffD, vaffc.data(), N * sizeof(F), cudaMemcpyHostToDevice) );
+    tm += mark([&]() { fm(vaffD, xoffD, xdegD, xedgD, xweiD, N, NL); });
     // Perform Louvain iterations
     mark([&]() {
       // Start timing first pass.
@@ -1074,10 +1075,10 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
       for (l=0, p=0; M>0 && P>0;) {
         if (p==1) t1 = timeNow();
         bool isFirst = p==0;
-        int m = 0;
+        int  m = 0;
         tl += measureDuration([&]() {
-          if (isFirst) m = louvainMoveCuU(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
-          else         m = louvainMoveCuU(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
+          if (isFirst) m = louvainMoveCuU<HTYPE>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, K(N),  K(NL), M, R, L, fc);
+          else         m = louvainMoveCuU<HTYPE>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, K(GN), K(GN), M, R, L, fc);
         });
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
@@ -1087,23 +1088,23 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
         if (isFirst) louvainCommunityExistsCuU(ncomD, cdegD, ucomD, K(), K(N));
         else         louvainCommunityExistsCuU(ncomD, cdegD, vcomD, K(), K(GN));
         TRY_CUDA( cudaMemcpy(&CN, ncomD, sizeof(uint64_cu), cudaMemcpyDeviceToHost) );
-        if (double(CN)/GN >= EAGGR) break;
-        if (isFirst) louvainRenumberCommunitiesCuU(ucomD, cdegD, bufkD, K(N),  SCAN);
-        else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN), SCAN);
+        if (double(CN)/GN >= o.aggregationTolerance) break;  // o.aggregationTolerance = min(max(1 - 0.025 * X / N, 0.1), 0.9)
+        if (isFirst) louvainRenumberCommunitiesCuU(ucomD, cdegD, bufkD, K(N));
+        else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN));
         if (isFirst) {}
         else         louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
-        if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), SCAN);
-        else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), SCAN);
         ta += measureDuration([&]() {
-          if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), SCAN);
-          else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), SCAN);
+          if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN));
+          else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN));
+          if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN));
+          else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN));
         });
         fillValueCuW(vtotD, size_t(CN), W());
         fillValueCuW(vaffD, size_t(CN), F(1));
         louvainVertexWeightsThreadCuW(vtotD, yoffD, ydegD, yweiD, K(), K(CN));
         louvainVertexWeightsBlockCuW (vtotD, yoffD, ydegD, yweiD, K(), K(CN));
         louvainInitializeCuW(vcomD, ctotD, vtotD, K(), K(CN));
-        E /= EDROP;
+        E /= o.toleranceDrop;
         swap(xoffD, yoffD);
         swap(xdegD, ydegD);
         swap(xedgD, yedgD);
@@ -1114,31 +1115,33 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
       else louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
       if (p<=1) t1 = timeNow();
       tp += duration(t0, t1);
-    }); }, o.repeat);
-  TRY_CUDA(cudaMemcpy(ucomc.data(), ucomD, N * sizeof(K), cudaMemcpyDeviceToHost));
+    });
+  }, o.repeat);
+  TRY_CUDA( cudaMemcpy(ucomc.data(), ucomD, N * sizeof(K), cudaMemcpyDeviceToHost) );
   scatterValuesOmpW(ucom, ucomc, ks);
-  TRY_CUDA(cudaFree(vaffD));
-  TRY_CUDA(cudaFree(ucomD));
-  TRY_CUDA(cudaFree(vcomD));
-  TRY_CUDA(cudaFree(vtotD));
-  TRY_CUDA(cudaFree(ctotD));
-  TRY_CUDA(cudaFree(bufoD));
-  TRY_CUDA(cudaFree(bufkD));
-  TRY_CUDA(cudaFree(bufwD));
-  TRY_CUDA(cudaFree(xoffD));
-  TRY_CUDA(cudaFree(xdegD));
-  TRY_CUDA(cudaFree(xedgD));
-  TRY_CUDA(cudaFree(xweiD));
-  TRY_CUDA(cudaFree(yoffD));
-  TRY_CUDA(cudaFree(ydegD));
-  TRY_CUDA(cudaFree(yedgD));
-  TRY_CUDA(cudaFree(yweiD));
-  TRY_CUDA(cudaFree(coffD));
-  TRY_CUDA(cudaFree(cdegD));
-  TRY_CUDA(cudaFree(cedgD));
-  TRY_CUDA(cudaFree(ncomD));
-  TRY_CUDA(cudaFree(elD));
-  return LouvainResult<K, W>(ucom, utot, ctot, l, p, t, tm/o.repeat, ti/o.repeat, tp/o.repeat, tl/o.repeat, ta/o.repeat, countValueOmp(vaff, F(1)));
+  // Free device memory.
+  TRY_CUDA( cudaFree(vaffD) );
+  TRY_CUDA( cudaFree(ucomD) );
+  TRY_CUDA( cudaFree(vcomD) );
+  TRY_CUDA( cudaFree(vtotD) );
+  TRY_CUDA( cudaFree(ctotD) );
+  TRY_CUDA( cudaFree(bufoD) );
+  TRY_CUDA( cudaFree(bufkD) );
+  TRY_CUDA( cudaFree(bufwD) );
+  TRY_CUDA( cudaFree(xoffD) );
+  TRY_CUDA( cudaFree(xdegD) );
+  TRY_CUDA( cudaFree(xedgD) );
+  TRY_CUDA( cudaFree(xweiD) );
+  TRY_CUDA( cudaFree(yoffD) );
+  TRY_CUDA( cudaFree(ydegD) );
+  TRY_CUDA( cudaFree(yedgD) );
+  TRY_CUDA( cudaFree(yweiD) );
+  TRY_CUDA( cudaFree(coffD) );
+  TRY_CUDA( cudaFree(cdegD) );
+  TRY_CUDA( cudaFree(cedgD) );
+  TRY_CUDA( cudaFree(ncomD) );
+  TRY_CUDA( cudaFree(elD) );
+  return LouvainResult<K, W>(ucom, utot, ctot, l, p, t, tm/o.repeat, ti/o.repeat, tp/o.repeat, tl/o.repeat, ta/o.repeat);
 }
 #pragma endregion
 
@@ -1148,20 +1151,28 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
 #pragma region STATIC
 /**
  * Obtain the community membership of each vertex with Static Louvain.
- * @tparam FLAG flag type for tracking affected vertices
- * @param x original graph
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam HWEIGHT hashtable weight type
+ * @param x input graph
  * @param o louvain options
  * @returns louvain result
  */
-template <class FLAG = char, class G>
-inline auto louvainStaticCuda(const G &x, const LouvainOptions &o={}) {
-  using K = typename G::key_type;
-  auto fi = [&](auto &vcom, auto &vtot, auto &ctot) {
-    louvainVertexWeightsW(vtot, x);
-    louvainInitializeW(vcom, ctot, x, vtot);
+template <int HTYPE=3, class HWEIGHT=float, class G>
+inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
+  using  O = uint32_t;
+  using  K = typename G::key_type;
+  using  V = typename G::edge_value_type;
+  using  W = LOUVAIN_WEIGHT_TYPE;
+  using  F = char;
+  auto  fi = [](K *vcomD, W *vtotD, W *ctotD, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K N, K NL) {
+    louvainVertexWeightsThreadCuW(vtotD, xoff, xdeg, xwei, K(), NL);
+    louvainVertexWeightsBlockCuW (vtotD, xoff, xdeg, xwei, NL,  N);
+    louvainInitializeCuW(vcomD, ctotD, vtotD, K(), N);
   };
-  auto fm = [](auto &vaff) { fillValueOmpU(vaff, FLAG(1)); };
-  return louvainInvokeCuda<false, FLAG>(x, o, fi, fm);
+  auto  fm = [](F *vaffD, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K N, K NL) {
+    fillValueCuW(vaffD, N, F(1));
+  };
+  return louvainInvokeCuda<HTYPE, HWEIGHT>(x, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion

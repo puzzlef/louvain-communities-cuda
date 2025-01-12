@@ -254,6 +254,25 @@ inline double deltaModularity(double vcout, double vdout, double vtot, double ct
   ASSERT(vcout>=0 && vdout>=0 && vtot>=0 && ctot>=0 && dtot>=0 && M>0 && R>0);
   return (vcout-vdout)/M - R*vtot*(vtot+ctot-dtot)/(2*M*M);
 }
+
+
+#ifdef CUDA
+/**
+ * Find the change in modularity when moving a vertex from community D to C.
+ * @param vcout total weight of edges from vertex v to community C
+ * @param vdout total weight of edges from vertex v to community D
+ * @param vtot total weight of edges from vertex v
+ * @param ctot total weight of edges from community C
+ * @param dtot total weight of edges from community C
+ * @param M total weight of "undirected" graph (1/2 of directed graph)
+ * @param R resolution (0, 1]
+ * @returns delta-modularity [-0.5, 1]
+ * @see https://gist.github.com/wolfram77/a3c95cd94a38a100f9b075594a823928
+ */
+inline double __device__ deltaModularityCud(double vcout, double vdout, double vtot, double ctot, double dtot, double M, double R=1) {
+  return (vcout-vdout)/M - R*vtot*(vtot+ctot-dtot)/(2*M*M);
+}
+#endif
 #pragma endregion
 
 
