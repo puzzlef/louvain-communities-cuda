@@ -748,7 +748,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
   K shrk[2 * MAX_DEGREE];
   W shrw[2 * MAX_DEGREE];
   for (K c=CB+B*b+t; c<CE; c+=G*B) {
-    size_t EO = yoff[c];
+    // size_t EO = yoff[c];
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
