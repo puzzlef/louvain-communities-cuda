@@ -1,7 +1,9 @@
-## Binaries
-## --------
+## Generated files
+## ---------------
 *.out
 *.exe
+*.log
+*.csv
 
 ## VS Code
 ## -------
