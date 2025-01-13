@@ -1,5 +1,4 @@
 #pragma once
-#include <tuple>
 #include <vector>
 #include <algorithm>
 #include "_main.hxx"
@@ -12,7 +11,6 @@ using std::count_if;
 using std::max;
 using std::min;
 using std::partition;
-using std::tuple;
 using std::vector;
 
 #pragma region DEGREE LIMITS
@@ -1147,10 +1145,10 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
         tl += measureDuration([&]() {
           if (isFirst) m = louvainMoveCuU(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
           else         m = louvainMoveCuU(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
-        
+
           TRY_CUDA( cudaDeviceSynchronize() );
         });
-        
+
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
         uint64_cu CN = 0;
@@ -1171,7 +1169,7 @@ inline auto louvainInvokeCuda(const G &x, const LouvainOptions &o, FI fi, FM fm)
         ta += measureDuration([&]() {
           if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), SCAN);
           else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), SCAN);
-        
+
         TRY_CUDA( cudaDeviceSynchronize() );
         });
         fillValueCuW(vtotD, size_t(CN), W());
@@ -1240,76 +1238,6 @@ inline auto louvainStaticCuda(const G &x, const LouvainOptions &o = {})
     fillValueOmpU(vaff, FLAG(1));
   };
   return louvainInvokeCuda<false, FLAG>(x, o, fi, fm);
-}
-#pragma endregion
-
-#pragma region NAIVE-DYNAMIC APPROACH
-/**
- * Obtain the community membership of each vertex with Naive-dynamic Louvain.
- * @param y updated graph
- * @param deletions edge deletions for this batch update (undirected)
- * @param insertions edge insertions for this batch update (undirected)
- * @param q initial community each vertex belongs to
- * @param qvtot initial total edge weight of each vertex
- * @param qctot initial total edge weight of each community
- * @param o louvain options
- * @returns louvain result
- */
-template <class FLAG = char, class G, class K, class V, class W>
-inline auto louvainNaiveDynamicCuda(const G &y, const vector<tuple<K, K, V>> &deletions, const vector<tuple<K, K, V>> &insertions, const vector<K> &q, const vector<W> &qvtot, const vector<W> &qctot, const LouvainOptions &o = {})
-{
-  vector2d<K> qs;
-  vector2d<W> qvtots, qctots;
-  louvainSetupInitialsW(qs, qvtots, qctots, q, qvtot, qctot, o.repeat);
-  int r = 0;
-  auto fi = [&](auto &vcom, auto &vtot, auto &ctot)
-  {
-    vcom = move(qs[r]);
-    vtot = move(qvtots[r]);
-    ctot = move(qctots[r]);
-    ++r;
-    louvainUpdateWeightsFromOmpU(vtot, ctot, y, deletions, insertions, vcom);
-  };
-  auto fm = [](auto &vaff, const auto &vcom, const auto &vtot, const auto &ctot, auto &vcs, auto &vcout)
-  {
-    fillValueOmpU(vaff, FLAG(1));
-  };
-  return louvainInvokeCuda<true, FLAG>(y, o, fi, fm);
-}
-#pragma endregion
-
-#pragma region DYNAMIC FRONTIER APPROACH
-/**
- * Obtain the community membership of each vertex with Dynamic Frontier Louvain.
- * @param y updated graph
- * @param deletions edge deletions in batch update
- * @param insertions edge insertions in batch update
- * @param q initial community each vertex belongs to
- * @param qvtot initial total edge weight of each vertex
- * @param qctot initial total edge weight of each community
- * @param o louvain options
- * @returns louvain result
- */
-template <class FLAG = char, class G, class K, class V, class W>
-inline auto louvainDynamicFrontierCuda(const G &y, const vector<tuple<K, K, V>> &deletions, const vector<tuple<K, K, V>> &insertions, const vector<K> &q, const vector<W> &qvtot, const vector<W> &qctot, const LouvainOptions &o = {})
-{
-  vector2d<K> qs;
-  vector2d<W> qvtots, qctots;
-  louvainSetupInitialsW(qs, qvtots, qctots, q, qvtot, qctot, o.repeat);
-  int r = 0;
-  auto fi = [&](auto &vcom, auto &vtot, auto &ctot)
-  {
-    vcom = move(qs[r]);
-    vtot = move(qvtots[r]);
-    ctot = move(qctots[r]);
-    ++r;
-    louvainUpdateWeightsFromOmpU(vtot, ctot, y, deletions, insertions, vcom);
-  };
-  auto fm = [&](auto &vaff, auto &vcs, auto &vcout, const auto &vcom, const auto &vtot, const auto &ctot)
-  {
-    louvainAffectedVerticesFrontierOmpW(vaff, y, deletions, insertions, vcom);
-  };
-  return louvainInvokeCuda<true, FLAG>(y, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
