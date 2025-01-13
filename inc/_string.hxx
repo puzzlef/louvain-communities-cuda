@@ -1,6 +1,6 @@
 #pragma once
-#include <string>
 #include <cstdint>
+#include <string>
 #include "_debug.hxx"
 
 using std::string;
@@ -9,6 +9,7 @@ using std::string;
 
 
 #pragma region METHODS
+#pragma region COUNT LINES
 /**
  * Count the number of lines in a string.
  * @param x string
@@ -33,4 +34,5 @@ inline size_t countLines(const char* x) {
 inline size_t countLines(const string& x) {
   return countLines(x.c_str());
 }
+#pragma endregion
 #pragma endregion
