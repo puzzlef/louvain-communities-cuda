@@ -970,13 +970,13 @@ inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
  * @param fm marking affected vertices (vaff)
  * @returns louvain result
  */
-template <bool DYNAMIC=false, class FLAG=char, class G, class FI, class FM>
+template <class G, class FI, class FM>
 inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
+  using O = uint32_t;
   using K = typename G::key_type;
   using V = typename G::edge_value_type;
   using W = LOUVAIN_WEIGHT_TYPE;
-  using F = FLAG;
-  using O = uint32_t;
+  using F = char;
   // Get graph properties.
   size_t X = x.size();
   size_t S = x.span();
@@ -991,17 +991,14 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   double EAGGR = coalesce(o.aggregationTolerance, min(max(1 - 0.025 * X / N, 0.1), 0.9));
   // Allocate buffers on host, original and compressed.
   int T = omp_get_max_threads();
-  vector<F> vaff(S), vaffc(N); // Affected vertex flag (any pass)
-  vector<K> ucom, ucomc(N);    // Community membership (first pass)
-  vector<W> utot, utotc(N);    // Total vertex weights (first pass)
-  vector<W> ctot, ctotc(N);    // Total community weights (first pass)
-  vector<O> xoff(N + 1);       // Offsets of input graph
-  vector<K> xdeg(N);           // Degrees of input graph
-  vector<K> xedg(X);           // Edge keys of input graph
-  vector<V> xwei(X);           // Edge values of input graph
-  if (!DYNAMIC) ucom.resize(S);
-  if (!DYNAMIC) utot.resize(S);
-  if (!DYNAMIC) ctot.resize(S);
+  vector<F> vaff(S), vaffc(N);  // Affected vertex flag (any pass)
+  vector<K> ucom(S), ucomc(N);  // Community membership (first pass)
+  vector<W> utot(S), utotc(N);  // Total vertex weights (first pass)
+  vector<W> ctot(S), ctotc(N);  // Total community weights (first pass)
+  vector<O> xoff(N+1);          // Offsets of input graph
+  vector<K> xdeg(N);            // Degrees of input graph
+  vector<K> xedg(X);            // Edge keys of input graph
+  vector<V> xwei(X);            // Edge values of input graph
   // Allocate buffers on device.
   F *vaffD = nullptr;  // Affected vertex flag
   K *ucomD = nullptr, *vcomD = nullptr;  // Community membership (first, subsequent passes)
@@ -1164,22 +1161,22 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
 #pragma region STATIC
 /**
  * Obtain the community membership of each vertex with Static Louvain.
- * @tparam FLAG flag type for tracking affected vertices
  * @param x input graph
  * @param o louvain options
  * @returns louvain result
  */
-template <class FLAG=char, class G>
+template <class G>
 inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   using K = typename G::key_type;
+  using F = char;
   auto fi = [&](auto& vcom, auto& vtot, auto& ctot) {
     louvainVertexWeightsW(vtot, x);
     louvainInitializeW(vcom, ctot, x, vtot);
   };
   auto fm = [](auto& vaff) {
-    fillValueOmpU(vaff, FLAG(1));
+    fillValueOmpU(vaff, F(1));
   };
-  return louvainInvokeCuda<false, FLAG>(x, o, fi, fm);
+  return louvainInvokeCuda(x, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
