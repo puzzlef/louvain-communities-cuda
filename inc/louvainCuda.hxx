@@ -16,12 +16,32 @@ using std::min;
 
 
 
-#pragma region DEGREE LIMITS
-#ifndef LOUVAIN_DEGREE_THREAD
-/** Degree limit for using thread-per-vertex kernel. */
-#define LOUVAIN_DEGREE_THREAD 32
-/** Degree limit for using shared memory with block-per-vertex kernel. */
-#define LOUVAIN_DEGREE_BLOCK_SHARED 128
+#pragma region CONSTANTS
+#ifndef LOUVAIN_SDEG_VERTEX_WEIGHTS
+/** Threads per thread-block for finding total edge weight of each vertex, using thread-per-vertex approach. */
+#define LOUVAIN_BLIM_VERTEX_WEIGHTS_THREAD 64  // Was 32
+/** Threads per thread-block for finding total edge weight of each vertex, using block-per-vertex approach. */
+#define LOUVAIN_BLIM_VERTEX_WEIGHTS_BLOCK  BLOCK_LIMIT_MAP_CUDA
+/** Switch-degree between thread- and block-per-vertex kernels for finding total edge weight of each vertex. */
+#define LOUVAIN_SDEG_VERTEX_WEIGHTS        32
+#endif
+
+#ifndef LOUVAIN_SDEG_MOVE
+/** Threads per thread-block for local-moving phase, using thread-per-vertex approach. */
+#define LOUVAIN_BLIM_MOVE_THREAD 64
+/** Threads per thread-block for local-moving phase, using block-per-vertex approach. */
+#define LOUVAIN_BLIM_MOVE_BLOCK  32
+/** Switch-degree between thread- and block-per-vertex kernels for local-moving phase. */
+#define LOUVAIN_SDEG_MOVE        16
+#endif
+
+#ifndef LOUVAIN_SDEG_AGGREGATE
+/** Threads per thread-block for aggregation phase, using thread-per-vertex approach. */
+#define LOUVAIN_BLIM_AGGREGATE_THREAD 128
+/** Threads per thread-block for aggregation phase, using block-per-vertex approach. */
+#define LOUVAIN_BLIM_AGGREGATE_BLOCK  1024
+/** Switch-degree between thread- and block-per-vertex kernels for aggregation phase. */
+#define LOUVAIN_SDEG_AGGREGATE        32
 #endif
 #pragma endregion
 
@@ -40,7 +60,7 @@ using std::min;
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <int SDEG=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int SDEG=LOUVAIN_SDEG_VERTEX_WEIGHTS, class O, class K, class V, class W>
 void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
@@ -65,9 +85,9 @@ void __global__ louvainVertexWeightsThreadCukW(W *vtot, const O *xoff, const K *
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <int SDEG=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int SDEG=LOUVAIN_SDEG_VERTEX_WEIGHTS, class O, class K, class V, class W>
 inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
-  const int B = blockSizeCu(NE-NB, LOUVAIN_DEGREE_THREAD);
+  const int B = blockSizeCu(NE-NB, LOUVAIN_BLIM_VERTEX_WEIGHTS_THREAD);
   const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainVertexWeightsThreadCukW<SDEG><<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
 }
@@ -83,10 +103,10 @@ inline void louvainVertexWeightsThreadCuW(W *vtot, const O *xoff, const K *xdeg,
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <int SDEG=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int SDEG=LOUVAIN_SDEG_VERTEX_WEIGHTS, int BLIM=LOUVAIN_BLIM_VERTEX_WEIGHTS_BLOCK, class O, class K, class V, class W>
 void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
   DEFINE_CUDA(t, b, B, G);
-  __shared__ W cache[BLOCK_LIMIT_MAP_CUDA];
+  __shared__ W cache[BLIM];
   for (K u=NB+b; u<NE; u+=G) {
     size_t EO = xoff[u];
     size_t EN = xdeg[u];
@@ -112,11 +132,11 @@ void __global__ louvainVertexWeightsBlockCukW(W *vtot, const O *xoff, const K *x
  * @param NB begin vertex (inclusive)
  * @param NE end vertex (exclusive)
  */
-template <int SDEG=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int SDEG=LOUVAIN_SDEG_VERTEX_WEIGHTS, int BLIM=LOUVAIN_BLIM_VERTEX_WEIGHTS_BLOCK, class O, class K, class V, class W>
 inline void louvainVertexWeightsBlockCuW(W *vtot, const O *xoff, const K *xdeg, const V *xwei, K NB, K NE) {
-  const int B = blockSizeCu<true>(NE-NB, BLOCK_LIMIT_MAP_CUDA);
+  const int B = blockSizeCu<true>(NE-NB, BLIM);
   const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainVertexWeightsBlockCukW<SDEG><<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
+  louvainVertexWeightsBlockCukW<SDEG, BLIM><<<G, B>>>(vtot, xoff, xdeg, xwei, NB, NE);
 }
 
 
@@ -295,7 +315,7 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class F>
 void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[BLIM];
@@ -309,7 +329,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
     K d = vcom[u];
     size_t EO = xoff[u];
     size_t EN = xdeg[u];
-    if (EN==0 || EN >= LOUVAIN_DEGREE_THREAD) continue;  // Skip isolated and high-degree vertices
+    if (EN==0 || EN >= LOUVAIN_SDEG_MOVE) continue;  // Skip isolated and high-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // shrk
@@ -361,7 +381,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class F>
 inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu(NE-NB, BLIM);
   const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
@@ -390,7 +410,7 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_BLOCK_SHARED, class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class F>
 void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
@@ -410,7 +430,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     // Scan communities connected to u.
     size_t EO = xoff[u];
     size_t EN = xdeg[u];
-    if (EN==0 || EN < LOUVAIN_DEGREE_THREAD) continue;  // Skip isolated and low-degree vertices
+    if (EN==0 || EN < LOUVAIN_SDEG_MOVE) continue;  // Skip isolated and low-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // EN <= DMAX? shrk : bufk + 2*EO
@@ -466,7 +486,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_BLOCK_SHARED, class O, class K, class V, class W, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class F>
 inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu<true>(NE-NB, BLIM);
   const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
@@ -755,7 +775,7 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class W>
 void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
@@ -766,7 +786,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
-    if (CN==0 || EN >= LOUVAIN_DEGREE_THREAD) continue;  // Skip empty communities, or those with high total degree
+    if (CN==0 || EN >= LOUVAIN_SDEG_AGGREGATE) continue;  // Skip empty communities, or those with high total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // shrk
@@ -810,7 +830,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class W>
 inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu(CE-CB, BLIM);
   const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_MAP_CUDA);
@@ -821,7 +841,6 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W
 /**
  * Aggregate outgoing edges of each community, using block-per-community approach [kernel].
  * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
- * @tparam BLIM maximum number of threads per block
  * @param ydeg degrees of aggregated graph (updated)
  * @param yedg edge keys of aggregated graph (updated)
  * @param ywei edge values of aggregated graph (updated)
@@ -838,7 +857,7 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int HTYPE=3, class O, class K, class V, class W>
 void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   for (K c=CB+b; c<CE; c+=G) {
@@ -847,7 +866,7 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
-    if (CN==0 || EN < LOUVAIN_DEGREE_THREAD) continue;  // Skip empty communities, or those with low total degree
+    if (CN==0 || EN < LOUVAIN_SDEG_AGGREGATE) continue;  // Skip empty communities, or those with low total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;
@@ -894,11 +913,11 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, class O, class K, class V, class W>
 inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
-  const int B = blockSizeCu<true>(CE-CB, 4 * LOUVAIN_DEGREE_BLOCK_SHARED);
+  const int B = blockSizeCu<true>(CE-CB, BLIM);
   const int G = gridSizeCu <true>(CE-CB, B, GRID_LIMIT_MAP_CUDA);
-  louvainAggregateEdgesBlockCukU<HTYPE, BLIM><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
+  louvainAggregateEdgesBlockCukU<HTYPE><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
 
 
