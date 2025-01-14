@@ -1005,11 +1005,9 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   size_t B = max(N+1, size_t(BLOCK_LIMIT_CUDA));
   double M = edgeWeightOmp(x) / 2;
   // Options.
-  double R = coalesce(o.resolution, 1.0);
-  int L = coalesce(o.maxIterations, 10), l = 0;
-  int P = coalesce(o.maxPasses, 5), p = 0;
-  double EDROP = coalesce(o.toleranceDrop, 10.0);
-  double EAGGR = coalesce(o.aggregationTolerance, min(max(1 - 0.025 * X / N, 0.1), 0.9));
+  double R = o.resolution;            // 1
+  int    L = o.maxIterations, l = 0;  // 10
+  int    P = o.maxPasses, p = 0;      // 10 (5?)
   // Allocate buffers on host, original and compressed.
   int T = omp_get_max_threads();
   vector<K> ucom(S), ucomc(N);  // Community membership (first pass)
@@ -1071,7 +1069,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   float tm = 0, ti = 0, tp = 0, tl = 0, ta = 0; // Time spent in different phases
   float t  = measureDurationMarked([&](auto mark) {
     size_t GN = N;
-    double E  = coalesce(o.tolerance, 1e-2);
+    double E  = o.tolerance;  // 0.01
     auto   fc = [&](double el, int l) { return el<=E; };
     // Reset buffers, in case of multiple runs.
     fillValueOmpU(ucom, K());
@@ -1113,7 +1111,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         if (isFirst) louvainCommunityExistsCuU(ncomD, cdegD, ucomD, K(), K(N));
         else         louvainCommunityExistsCuU(ncomD, cdegD, vcomD, K(), K(GN));
         TRY_CUDA( cudaMemcpy(&CN, ncomD, sizeof(uint64_cu), cudaMemcpyDeviceToHost) );
-        if (double(CN)/GN >= EAGGR) break;
+        if (double(CN)/GN >= o.aggregationTolerance) break;  // 0.8
         if (isFirst) louvainRenumberCommunitiesCuU(ucomD, cdegD, bufkD, K(N),  B);
         else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN), B);
         if (isFirst) {}
@@ -1129,7 +1127,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         louvainVertexWeightsThreadCuW(vtotD, yoffD, ydegD, yweiD, K(), K(CN));
         louvainVertexWeightsBlockCuW (vtotD, yoffD, ydegD, yweiD, K(), K(CN));
         louvainInitializeCuW(vcomD, ctotD, vtotD, K(), K(CN));
-        E /= EDROP;
+        E /= o.toleranceDrop;  // 10
         swap(xoffD, yoffD);
         swap(xdegD, ydegD);
         swap(xedgD, yedgD);
