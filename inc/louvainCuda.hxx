@@ -926,26 +926,10 @@ template <class O, class K, class V, class W>
 inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t SCAN) {
   fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
-  float temp1 = 0, temp2 = 0, temp3 = 0;
-  TRY_CUDA( cudaDeviceSynchronize() );
-  temp1 += measureDuration([&]() {
-    louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
-    TRY_CUDA( cudaDeviceSynchronize() );
-  });
-  TRY_CUDA( cudaDeviceSynchronize());
-  temp2 += measureDuration([&]() {
-    exclusiveScanCubW(yoff, bufo, yoff, C+1, SCAN);
-    TRY_CUDA( cudaDeviceSynchronize() );
-  });
-  TRY_CUDA( cudaDeviceSynchronize() );
-  temp3 += measureDuration([&]() {
-    louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-    louvainAggregateEdgesBlockCuU (ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-    TRY_CUDA( cudaDeviceSynchronize() );
-  });
-  printf("\nlouvainCommunityTotalDegreeCuU: %f\n", temp1);
-  printf("exclusiveScanSubW: %f\n", temp2);
-  printf("louvainAggregateEdges: %f\n", temp3);
+  louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
+  exclusiveScanCubW(yoff, bufo, yoff, C+1, SCAN);
+  louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesBlockCuU (ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
 }
 #pragma endregion
 
