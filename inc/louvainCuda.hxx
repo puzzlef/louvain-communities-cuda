@@ -964,13 +964,15 @@ inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
 #pragma region ENVIRONMENT SETUP
 /**
  * Setup and perform the Louvain algorithm.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam HWEIGHT hashtable weight type
  * @param x input graph
  * @param o louvain options
- * @param fi initializing community membership and total vertex/community weights (vcom, vtot, ctot)
- * @param fm marking affected vertices (vaff)
+ * @param fi initializing community membership and total vertex/community weights (vcom, vtot, ctot, xoff, xdeg, xedg, xwei, ks, N, NL)
+ * @param fm marking affected vertices (vaff, xoff, xdeg, xedg, xwei, ks, N, NL)
  * @returns louvain result
  */
-template <class G, class FI, class FM>
+template <int HTYPE=3, class HWEIGHT=float, class G, class FI, class FM>
 inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -991,7 +993,6 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   double EAGGR = coalesce(o.aggregationTolerance, min(max(1 - 0.025 * X / N, 0.1), 0.9));
   // Allocate buffers on host, original and compressed.
   int T = omp_get_max_threads();
-  vector<F> vaff(S), vaffc(N);  // Affected vertex flag (any pass)
   vector<K> ucom(S), ucomc(N);  // Community membership (first pass)
   vector<W> utot(S), utotc(N);  // Total vertex weights (first pass)
   vector<W> ctot(S), ctotc(N);  // Total community weights (first pass)
@@ -1054,7 +1055,6 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
     double E  = coalesce(o.tolerance, 1e-2);
     auto   fc = [&](double el, int l) { return el<=E; };
     // Reset buffers, in case of multiple runs.
-    fillValueOmpU(vaff, F());
     fillValueOmpU(ucom, K());
     fillValueOmpU(utot, W());
     fillValueOmpU(ctot, W());
@@ -1069,15 +1069,9 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
     TRY_CUDA( cudaMemcpy(xedgD, xedg.data(),  X    * sizeof(K), cudaMemcpyHostToDevice) );
     TRY_CUDA( cudaMemcpy(xweiD, xwei.data(),  X    * sizeof(V), cudaMemcpyHostToDevice) );
     // Initialize community membership and total vertex/community weights.
-    ti += mark([&]() {
-      louvainVertexWeightsThreadCuW(vtotD, xoffD, xdegD, xweiD, K(), K(N));
-      louvainVertexWeightsBlockCuW (vtotD, xoffD, xdegD, xweiD, K(), K(N));
-      louvainInitializeCuW(ucomD, ctotD, vtotD, K(), K(N));
-    });
+    ti += mark([&]() { fi(ucomD, vtotD, ctotD, xoffD, xdegD, xedgD, xweiD, ks, N, NL); });
     // Mark affected vertices.
-    tm += mark([&]() { fm(vaff); });
-    gatherValuesOmpW(vaffc, vaff, ks);
-    TRY_CUDA( cudaMemcpy(vaffD, vaffc.data(), N * sizeof(F), cudaMemcpyHostToDevice) );
+    tm += mark([&]() { fm(vaffD, xoffD, xdegD, xedgD, xweiD, ks, N, NL); });
     // Perform Louvain iterations
     mark([&]() {
       // Start timing first pass.
@@ -1127,7 +1121,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
       else louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
       if (p<=1) t1 = timeNow();
       tp += duration(t0, t1);
-    }); }, o.repeat);
+    });
+  }, o.repeat);
   TRY_CUDA( cudaMemcpy(ucomc.data(), ucomD, N * sizeof(K), cudaMemcpyDeviceToHost) );
   scatterValuesOmpW(ucom, ucomc, ks);
   // Free device memory.
@@ -1152,7 +1147,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   TRY_CUDA( cudaFree(cedgD) );
   TRY_CUDA( cudaFree(ncomD) );
   TRY_CUDA( cudaFree(elD) );
-  return LouvainResult<K, W>(ucom, utot, ctot, l, p, t, tm/o.repeat, ti/o.repeat, tp/o.repeat, tl/o.repeat, ta/o.repeat, countValueOmp(vaff, F(1)));
+  return LouvainResult<K, W>(ucom, utot, ctot, l, p, t, tm/o.repeat, ti/o.repeat, tp/o.repeat, tl/o.repeat, ta/o.repeat);
 }
 #pragma endregion
 
@@ -1162,20 +1157,26 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
 #pragma region STATIC
 /**
  * Obtain the community membership of each vertex with Static Louvain.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @tparam HWEIGHT hashtable weight type
  * @param x input graph
  * @param o louvain options
  * @returns louvain result
  */
-template <class G>
+template <int HTYPE=3, class HWEIGHT=float, class G>
 inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
+  using O = uint32_t;
   using K = typename G::key_type;
+  using V = typename G::edge_value_type;
+  using W = LOUVAIN_WEIGHT_TYPE;
   using F = char;
-  auto fi = [&](auto& vcom, auto& vtot, auto& ctot) {
-    louvainVertexWeightsW(vtot, x);
-    louvainInitializeW(vcom, ctot, x, vtot);
+  auto fi = [](K *vcomD, W *vtotD, W *ctotD, const O *xoffD, const K *xdegD, const K *xedgD, const V *xweiD, const vector<K>& ks, K N, K NL) {
+    louvainVertexWeightsThreadCuW(vtotD, xoffD, xdegD, xweiD, K(), N);
+    louvainVertexWeightsBlockCuW (vtotD, xoffD, xdegD, xweiD, K(), N);
+    louvainInitializeCuW(vcomD, ctotD, vtotD, K(), N);
   };
-  auto fm = [](auto& vaff) {
-    fillValueOmpU(vaff, F(1));
+  auto fm = [](F *vaff, const O *xoffD, const K *xdegD, const K *xedgD, const V *xwei, const vector<K>& ks, K N, K NL) {
+    fillValueCuW(vaff, N, F(1));
   };
   return louvainInvokeCuda(x, o, fi, fm);
 }
