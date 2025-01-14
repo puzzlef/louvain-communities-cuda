@@ -1109,10 +1109,10 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN), SCAN);
         if (isFirst) {}
         else         louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
-        if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), SCAN);
-        else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), SCAN);
         TRY_CUDA( cudaDeviceSynchronize() );
         ta += measureDuration([&]() {
+          if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), SCAN);
+          else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), SCAN);
           if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), SCAN);
           else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), SCAN);
         TRY_CUDA( cudaDeviceSynchronize() );
