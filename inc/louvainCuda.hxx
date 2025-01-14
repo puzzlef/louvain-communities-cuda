@@ -299,21 +299,21 @@ template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V
 void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[BLIM];
-  const int DMAX = BLIM;
-  K shrk[2 * DMAX];
-  W shrw[2 * DMAX];
+  // const int DMAX = BLIM;
+  // K shrk[2*DMAX];
+  // W shrw[2*DMAX];
   elb[t] = 0;
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
     if (!vaff[u]) continue;
     // Scan communities connected to u.
     K d = vcom[u];
-    // size_t EO = xoff[u]
+    size_t EO = xoff[u];
     size_t EN = xdeg[u];
-    if (EN == 0 || EN >= LOUVAIN_DEGREE_THREAD) continue;  // Skip isolated and high-degree vertices
+    if (EN==0 || EN >= LOUVAIN_DEGREE_THREAD) continue;  // Skip isolated and high-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
-    K *hk = shrk; // bufk + 2*EO
-    W *hv = shrw; // bufw + 2*EO
+    K *hk = bufk + 2*EO;  // shrk
+    W *hv = bufw + 2*EO;  // shrw
     hashtableClearCudW(hk, hv, H, 0, 1);
     louvainScanCommunitiesCudU<false, false, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     // Calculate delta modularity of moving u to each community.
@@ -393,16 +393,16 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
 template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_BLOCK_SHARED, class O, class K, class V, class W, class F>
 void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
-  const int DMAX = BLIM;
-  __shared__ K shrk[2*DMAX];
-  __shared__ W shrw[2*DMAX];
+  // const int DMAX = BLIM;
+  // __shared__ K shrk[2*DMAX];
+  // __shared__ W shrw[2*DMAX];
   __shared__ double elb;
   __shared__ bool vaffu;
   __shared__ K d;
   __shared__ W vdout;
   if (t==0) elb = 0;
   for (K u=NB+b; u<NE; u+=G) {
-    __syncthreads();
+    // __syncthreads();
     if (t==0) vaffu = vaff[u];
     if (t==0) d = vcom[u];
     __syncthreads();
@@ -413,9 +413,9 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     if (EN==0 || EN < LOUVAIN_DEGREE_THREAD) continue;  // Skip isolated and low-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
-    K *hk = EN <= DMAX? shrk : bufk + 2*EO;
-    W *hv = EN <= DMAX? shrw : bufw + 2*EO;
-    __syncthreads();
+    K *hk = bufk + 2*EO;  // EN <= DMAX? shrk : bufk + 2*EO
+    W *hv = bufw + 2*EO;  // EN <= DMAX? shrw : bufw + 2*EO
+    // __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
     louvainScanCommunitiesCudU<false, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
@@ -758,19 +758,19 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
 template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V, class W>
 void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
-  const int DMAX = BLIM;
-  K shrk[2*DMAX];
-  W shrw[2*DMAX];
+  // const int DMAX = BLIM;
+  // K shrk[2*DMAX];
+  // W shrw[2*DMAX];
   for (K c=CB+B*b+t; c<CE; c+=G*B) {
-    // size_t EO = yoff[c];
+    size_t EO = yoff[c];
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
     if (CN==0 || EN >= LOUVAIN_DEGREE_THREAD) continue;  // Skip empty communities, or those with high total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
-    K *hk = shrk; // bufk + 2*EO
-    W *hv = shrw; // bufw + 2*EO
+    K *hk = bufk + 2*EO;  // shrk
+    W *hv = bufw + 2*EO;  // shrw
     // Get edges from community c into hashtable.
     hashtableClearCudW(hk, hv, H, 0, 1);
     for (size_t i=0; i<CN; ++i) {
@@ -842,7 +842,7 @@ template <int HTYPE=3, int BLIM=LOUVAIN_DEGREE_THREAD, class O, class K, class V
 void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   for (K c=CB+b; c<CE; c+=G) {
-    __syncthreads();
+    // __syncthreads();
     size_t EO = yoff[c];
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
@@ -853,10 +853,10 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     K *hk = bufk + 2*EO;
     W *hv = bufw + 2*EO;
     // Get edges from community c into hashtable.
-    __syncthreads();
+    // __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
-    for (size_t i = 0; i < CN; ++i) {
+    for (size_t i=0; i<CN; ++i) {
       K u = cedg[CO+i];
       louvainScanCommunitiesCudU<true, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     }
