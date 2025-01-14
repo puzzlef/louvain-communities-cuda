@@ -1036,11 +1036,11 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   TRY_CUDA( cudaMalloc(&bufkD, (2*X) * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&bufwD, (2*X) * sizeof(W)) );
   TRY_CUDA( cudaMalloc(&xoffD, (N+1) * sizeof(O)) );
-  TRY_CUDA( cudaMalloc(&xdegD,  N    * sizeof(O)) );
+  TRY_CUDA( cudaMalloc(&xdegD,  N    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&xedgD,  X    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&xweiD,  X    * sizeof(V)) );
   TRY_CUDA( cudaMalloc(&yoffD, (N+1) * sizeof(O)) );
-  TRY_CUDA( cudaMalloc(&ydegD,  N    * sizeof(O)) );
+  TRY_CUDA( cudaMalloc(&ydegD,  N    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&yedgD,  X    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&yweiD,  X    * sizeof(V)) );
   TRY_CUDA( cudaMalloc(&coffD, (N+1) * sizeof(K)) );
