@@ -670,14 +670,14 @@ inline void louvainPopulateCommunityVerticesCuU(K *cdeg, K *cedg, const K *coff,
  * @param vcom community each vertex belongs to
  * @param N number of vertices
  * @param C number of communities
- * @param SCAN size of buffer for exclusive scan
+ * @param B size of buffer for exclusive scan
  */
 template <class K>
-inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, const K *vcom, K N, K C, size_t SCAN) {
+inline void louvainCommunityVerticesCuW(K *coff, K *cdeg, K *cedg, K *bufk, const K *vcom, K N, K C, size_t B) {
   fillValueCuW(cdeg, C, K());
   fillValueCuW(coff, C+1, K());
   louvainCountCommunityVerticesCuU(coff, vcom, K(), N);
-  exclusiveScanCubW(coff, bufk, coff, C+1, SCAN);
+  exclusiveScanCubW(coff, bufk, coff, C+1, B);
   louvainPopulateCommunityVerticesCuU(cdeg, cedg, coff, vcom, K(), N);
 }
 #pragma endregion
@@ -726,11 +726,11 @@ inline void louvainLookupCommunitiesCuU(K *a, const K *vcom, K NB, K NE) {
  * @param cext does each community exist (updated)
  * @param bufk buffer for exclusive scan (scratch)
  * @param N number of vertices
- * @param SCAN size of buffer for exclusive scan
+ * @param B size of buffer for exclusive scan
  */
 template <class K>
-inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t SCAN) {
-  exclusiveScanCubW(cext, bufk, cext, N, SCAN);
+inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t B) {
+  exclusiveScanCubW(cext, bufk, cext, N, B);
   louvainLookupCommunitiesCuU(vcom, cext, K(), N);
 }
 
@@ -920,14 +920,14 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W 
  * @param cedg vertices in each community
  * @param N number of vertices in input graph
  * @param C number of communities
- * @param SCAN size of buffer for exclusive scan
+ * @param B size of buffer for exclusive scan
  */
 template <class O, class K, class V, class W>
-inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t SCAN) {
+inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t B) {
   fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
   louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
-  exclusiveScanCubW(yoff, bufo, yoff, C+1, SCAN);
+  exclusiveScanCubW(yoff, bufo, yoff, C+1, B);
   louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
   louvainAggregateEdgesBlockCuU (ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
 }
@@ -981,8 +981,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   size_t X = x.size();
   size_t S = x.span();
   size_t N = x.order();
+  size_t B = max(N+1, size_t(BLOCK_LIMIT_CUDA));
   double M = edgeWeightOmp(x) / 2;
-  size_t SCAN = max(N, size_t(1024));
   // Options.
   double R = coalesce(o.resolution, 1.0);
   int L = coalesce(o.maxIterations, 10), l = 0;
@@ -1015,14 +1015,23 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   K *cdegD = nullptr;  // Number of vertices in each community
   K *cedgD = nullptr;  // Vertices in each community
   uint64_cu *ncomD = nullptr;  // Number of communities
-  double      *elD = nullptr;  // Delta modularity per iteration
+  double    *elD   = nullptr;  // Delta modularity per iteration
+  // Partition vertices into low-degree and high-degree sets.
+  vector<K> ks = vertexKeys(x);
+  size_t    NL = louvainPartitionVerticesCudaU(ks, x);
+  // Obtain data for CSR.
+  csrCreateOffsetsW (xoff, x, ks);
+  csrCreateDegreesW (xdeg, x, ks);
+  csrCreateEdgeKeysW(xedg, x, ks);
+  csrCreateEdgeValuesW(xwei, x, ks);
+  // Allocate device memory.
   TRY_CUDA( cudaSetDeviceFlags(cudaDeviceMapHost) );
   TRY_CUDA( cudaMalloc(&vaffD,  N    * sizeof(F)) );
   TRY_CUDA( cudaMalloc(&ucomD,  N    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&vcomD,  N    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&vtotD,  N    * sizeof(W)) );
   TRY_CUDA( cudaMalloc(&ctotD,  N    * sizeof(W)) );
-  TRY_CUDA( cudaMalloc(&bufoD,  N    * sizeof(O)) );
+  TRY_CUDA( cudaMalloc(&bufoD,  B    * sizeof(O)) );
   TRY_CUDA( cudaMalloc(&bufkD, (2*X) * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&bufwD, (2*X) * sizeof(W)) );
   TRY_CUDA( cudaMalloc(&xoffD, (N+1) * sizeof(O)) );
@@ -1038,14 +1047,6 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   TRY_CUDA( cudaMalloc(&cedgD,  N    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&ncomD,  1    * sizeof(uint64_cu)) );
   TRY_CUDA( cudaMalloc(&elD,    1    * sizeof(double)) );
-  // Partition vertices into low-degree and high-degree sets.
-  vector<K> ks = vertexKeys(x);
-  size_t    NL = louvainPartitionVerticesCudaU(ks, x);
-  // Obtain data for CSR.
-  csrCreateOffsetsW (xoff, x, ks);
-  csrCreateDegreesW (xdeg, x, ks);
-  csrCreateEdgeKeysW(xedg, x, ks);
-  csrCreateEdgeValuesW(xwei, x, ks);
   // Perform Louvain algorithm on device.
   float tm = 0, ti = 0, tp = 0, tl = 0, ta = 0; // Time spent in different phases
   float t  = measureDurationMarked([&](auto mark) {
@@ -1100,15 +1101,15 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         else         louvainCommunityExistsCuU(ncomD, cdegD, vcomD, K(), K(GN));
         TRY_CUDA( cudaMemcpy(&CN, ncomD, sizeof(uint64_cu), cudaMemcpyDeviceToHost) );
         if (double(CN)/GN >= EAGGR) break;
-        if (isFirst) louvainRenumberCommunitiesCuU(ucomD, cdegD, bufkD, K(N),  SCAN);
-        else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN), SCAN);
+        if (isFirst) louvainRenumberCommunitiesCuU(ucomD, cdegD, bufkD, K(N),  B);
+        else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN), B);
         if (isFirst) {}
         else         louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
         ta += measureDuration([&]() {
-          if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), SCAN);
-          else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), SCAN);
-          if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), SCAN);
-          else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), SCAN);
+          if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), B);
+          else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), B);
+          if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), B);
+          else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), B);
         });
         fillValueCuW(vtotD, size_t(CN), W());
         fillValueCuW(vaffD, size_t(CN), F(1));
