@@ -230,16 +230,16 @@ inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE) {
  * @param i start index
  * @param DI index stride
  */
-template <bool SELF=false, bool BLOCK=false, int HTYPE=3, class O, class K, class V, class W>
-inline void __device__ louvainScanCommunitiesCudU(K *hk, W *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI) {
+template <bool SELF=false, bool BLOCK=false, int HTYPE=3, class O, class K, class V, class J>
+inline void __device__ louvainScanCommunitiesCudU(K *hk, J *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI) {
   size_t EO = xoff[u];
   size_t EN = xdeg[u];
   for (; i<EN; i+=DI) {
     K v = xedg[EO+i];
-    W w = xwei[EO+i];
+    V w = xwei[EO+i];
     K c = vcom[v];
     if (!SELF && u==v) continue;
-    hashtableAccumulateCudU<BLOCK, HTYPE>(hk, hv, H, T, c+1, w);
+    hashtableAccumulateCudU<BLOCK, HTYPE>(hk, hv, H, T, c+1, (J) w);
   }
 }
 
@@ -259,12 +259,12 @@ inline void __device__ louvainScanCommunitiesCudU(K *hk, W *hv, size_t H, size_t
  * @param i start index
  * @param DI index stride
  */
-template <class K, class W>
-inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, W *hv, size_t H, K d, const W *ctot, W vdout, W vtot, W dtot, W M, W R, size_t i, size_t DI) {
+template <class K, class W, class J>
+inline void __device__ louvainCalculateDeltaModularityCudU(K *hk, J *hv, size_t H, K d, const W *ctot, W vdout, W vtot, W dtot, W M, W R, size_t i, size_t DI) {
   for (; i<H; i+=DI) {
     if (!hk[i]) continue;
     K c = hk[i] - 1;
-    hv[i] = deltaModularityCud(hv[i], vdout, vtot, ctot[c], dtot, M, R);
+    hv[i] = (J) deltaModularityCud((W) hv[i], vdout, vtot, ctot[c], dtot, M, R);
   }
 }
 
@@ -315,8 +315,8 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class F>
-void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
+void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[BLIM];
   // const int DMAX = BLIM;
@@ -333,7 +333,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // shrk
-    W *hv = bufw + 2*EO;  // shrw
+    J *hv = bufw + 2*EO;  // shrw
     hashtableClearCudW(hk, hv, H, 0, 1);
     louvainScanCommunitiesCudU<false, false, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     // Calculate delta modularity of moving u to each community.
@@ -342,7 +342,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
     // Find best community for u.
     hashtableMaxCudU(hk, hv, H, 0, 1);
     vaff[u] = F();               // Mark u as unaffected (Use two buffers?)
-    if (hv[0] <= W()) continue;  // No good community found
+    if (hv[0] <= J()) continue;  // No good community found
     K c = hk[0] - 1;             // Best community
     if (c==d) continue;
     if (PICKLESS && c>d) continue;  // Pick smaller community-id (to avoid community swaps)
@@ -350,7 +350,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
     atomicAdd(&ctot[d], -vtot[u]);
     atomicAdd(&ctot[c],  vtot[u]);
     vcom[u] = c;
-    elb[t] += hv[0];
+    elb[t] += (W) hv[0];
     louvainMarkNeighborsCudU(vaff, xoff, xdeg, xedg, u, 0, 1);
   }
   // Update total delta modularity.
@@ -381,8 +381,8 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class F>
-inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
+inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu(NE-NB, BLIM);
   const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainMoveThreadCukU<HTYPE, BLIM><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
@@ -410,8 +410,8 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class F>
-void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
+void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
   // __shared__ K shrk[2*DMAX];
@@ -434,14 +434,14 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // EN <= DMAX? shrk : bufk + 2*EO
-    W *hv = bufw + 2*EO;  // EN <= DMAX? shrw : bufw + 2*EO
+    J *hv = bufw + 2*EO;  // EN <= DMAX? shrw : bufw + 2*EO
     // __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
     louvainScanCommunitiesCudU<false, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     __syncthreads();
     // Calculate delta modularity of moving u to each community.
-    if (t==0) vdout = hashtableGetCud(hk, hv, H, T, d+1);  // Can be optimized?
+    if (t==0) vdout = (W) hashtableGetCud(hk, hv, H, T, d+1);  // Can be optimized?
     __syncthreads();
     louvainCalculateDeltaModularityCudU(hk, hv, H, d, ctot, vdout, vtot[u], ctot[d], M, R, t, B);
     __syncthreads();
@@ -449,7 +449,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     hashtableMaxCudU<true>(hk, hv, H, t, B);
     __syncthreads();
     if (t==0) vaff[u] = F();               // Mark u as unaffected (Use two buffers?)
-    if (!hk[0] || hv[0] <= W()) continue;  // No good community found (Cache hk[0], hv[0]?)
+    if (!hk[0] || hv[0] <= J()) continue;  // No good community found (Cache hk[0], hv[0]?)
     K c = hk[0] - 1;                       // Best community
     if (c==d) continue;
     if (PICKLESS && c>d) continue;  // Pick smaller community-id (to avoid community swaps)
@@ -457,7 +457,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     if (t==0) atomicAdd(&ctot[d], -vtot[u]);
     if (t==0) atomicAdd(&ctot[c],  vtot[u]);
     if (t==0) vcom[u] = c;
-    if (t==0) elb += hv[0];
+    if (t==0) elb += (W) hv[0];
     louvainMarkNeighborsCudU(vaff, xoff, xdeg, xedg, u, t, B);
   }
   // Update total delta modularity.
@@ -486,8 +486,8 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class F>
-inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
+inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu<true>(NE-NB, BLIM);
   const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
   louvainMoveBlockCukU<HTYPE, BLIM><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
@@ -515,8 +515,8 @@ inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, 
  * @param NL number of vertices with low degree
  * @param fc has local moving phase converged?
  */
-template <int HTYPE=3, class O, class K, class V, class W, class F, class FC>
-inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
+template <int HTYPE=3, class O, class K, class V, class W, class J, class F, class FC>
+inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
   int l = 0;
   double elH = 0;
   const int PICKSTEP = 4;
@@ -775,8 +775,8 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class W>
-void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
+void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
   // K shrk[2*DMAX];
@@ -790,7 +790,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // shrk
-    W *hv = bufw + 2*EO;  // shrw
+    J *hv = bufw + 2*EO;  // shrw
     // Get edges from community c into hashtable.
     hashtableClearCudW(hk, hv, H, 0, 1);
     for (size_t i=0; i<CN; ++i) {
@@ -830,8 +830,8 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class W>
-inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
+inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu(CE-CB, BLIM);
   const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_MAP_CUDA);
   louvainAggregateEdgesThreadCukU<HTYPE, BLIM><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
@@ -857,8 +857,8 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, class O, class K, class V, class W>
-void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
+template <int HTYPE=3, class O, class K, class V, class J>
+void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   for (K c=CB+b; c<CE; c+=G) {
     // __syncthreads();
@@ -870,7 +870,7 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;
-    W *hv = bufw + 2*EO;
+    J *hv = bufw + 2*EO;
     // Get edges from community c into hashtable.
     // __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
@@ -913,8 +913,8 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, class O, class K, class V, class W>
-inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, class O, class K, class V, class J>
+inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu<true>(CE-CB, BLIM);
   const int G = gridSizeCu <true>(CE-CB, B, GRID_LIMIT_MAP_CUDA);
   louvainAggregateEdgesBlockCukU<HTYPE><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
@@ -923,6 +923,7 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W 
 
 /**
  * Louvain algorithm's community aggregation phase.
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
  * @param yoff offsets of aggregated graph (output)
  * @param ydeg degrees of aggregated graph (output)
  * @param yedg edge keys of aggregated graph (output)
@@ -941,14 +942,14 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, W 
  * @param C number of communities
  * @param B size of buffer for exclusive scan
  */
-template <class O, class K, class V, class W>
-inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, W *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t B) {
+template <int HTYPE=3, class O, class K, class V, class J>
+inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t B) {
   fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
   louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
   exclusiveScanCubW(yoff, bufo, yoff, C+1, B);
-  louvainAggregateEdgesThreadCuU(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-  louvainAggregateEdgesBlockCuU (ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesThreadCuU<HTYPE>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesBlockCuU <HTYPE>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
 }
 #pragma endregion
 
@@ -997,6 +998,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   using K = typename G::key_type;
   using V = typename G::edge_value_type;
   using W = LOUVAIN_WEIGHT_TYPE;
+  using J = HWEIGHT;
   using F = char;
   // Get graph properties.
   size_t X = x.size();
@@ -1024,7 +1026,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   W *ctotD = nullptr;  // Total community weights
   O *bufoD = nullptr;  // Buffer for exclusive scan
   K *bufkD = nullptr;  // Buffer for keys of hashtable
-  W *bufwD = nullptr;  // Buffer for values of hashtable
+  J *bufwD = nullptr;  // Buffer for values of hashtable
   O *xoffD = nullptr, *yoffD = nullptr;  // Offsets of input and aggregated graph
   K *xdegD = nullptr, *ydegD = nullptr;  // Degrees of input and aggregated graph
   K *xedgD = nullptr, *yedgD = nullptr;  // Edge keys of input and aggregated graph
@@ -1051,7 +1053,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
   TRY_CUDA( cudaMalloc(&ctotD,  N    * sizeof(W)) );
   TRY_CUDA( cudaMalloc(&bufoD,  B    * sizeof(O)) );
   TRY_CUDA( cudaMalloc(&bufkD, (2*X) * sizeof(K)) );
-  TRY_CUDA( cudaMalloc(&bufwD, (2*X) * sizeof(W)) );
+  TRY_CUDA( cudaMalloc(&bufwD, (2*X) * sizeof(J)) );
   TRY_CUDA( cudaMalloc(&xoffD, (N+1) * sizeof(O)) );
   TRY_CUDA( cudaMalloc(&xdegD,  N    * sizeof(K)) );
   TRY_CUDA( cudaMalloc(&xedgD,  X    * sizeof(K)) );
@@ -1100,8 +1102,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         bool isFirst = p==0;
         int m = 0;
         tl += measureDuration([&]() {
-          if (isFirst) m = louvainMoveCuU(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
-          else         m = louvainMoveCuU(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
+          if (isFirst) m = louvainMoveCuU<HTYPE>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
+          else         m = louvainMoveCuU<HTYPE>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
         });
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
@@ -1119,8 +1121,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         ta += measureDuration([&]() {
           if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), B);
           else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), B);
-          if (isFirst) louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), B);
-          else         louvainAggregateCuW(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), B);
+          if (isFirst) louvainAggregateCuW<HTYPE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), B);
+          else         louvainAggregateCuW<HTYPE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), B);
         });
         fillValueCuW(vtotD, size_t(CN), W());
         fillValueCuW(vaffD, size_t(CN), F(1));
@@ -1195,7 +1197,7 @@ inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   auto fm = [](F *vaff, const O *xoffD, const K *xdegD, const K *xedgD, const V *xwei, const vector<K>& ks, K N, K NL) {
     fillValueCuW(vaff, N, F(1));
   };
-  return louvainInvokeCuda(x, o, fi, fm);
+  return louvainInvokeCuda<HTYPE, HWEIGHT>(x, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
