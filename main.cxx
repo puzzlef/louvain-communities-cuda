@@ -75,8 +75,22 @@ void runExperiment(const G& x) {
   // Find static Louvain.
   auto b1 = louvainStaticOmp(x, {REPEAT_METHOD});
   flog(b1, "louvainStaticOmp");
-  auto b2 = louvainStaticCuda(x, {REPEAT_METHOD});
-  flog(b2, "louvainStaticCuda");
+  {
+    auto b2 = louvainStaticCuda<0>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCudaLinear");
+  }
+  {
+    auto b2 = louvainStaticCuda<1>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCudaQuadratic");
+  }
+  {
+    auto b2 = louvainStaticCuda<2>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCudaDouble");
+  }
+  {
+    auto b2 = louvainStaticCuda<3>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCudaQuadraticDouble");
+  }
 }
 
 
