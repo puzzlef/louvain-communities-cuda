@@ -515,11 +515,11 @@ inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, 
  * @param NL number of vertices with low degree
  * @param fc has local moving phase converged?
  */
-template <int HTYPE=3, class O, class K, class V, class W, class J, class F, class FC>
+template <int HTYPE=3, int PICKSTEP=4, class O, class K, class V, class W, class J, class F, class FC>
 inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
   int l = 0;
   double elH = 0;
-  const int PICKSTEP = 4;
+  // const int PICKSTEP = 4;
   while (l < L) {
     bool PICKLESS = (l + PICKSTEP / 2) % PICKSTEP == 0;
     fillValueCuW(el, 1, 0.0);
@@ -992,7 +992,7 @@ inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
  * @param fm marking affected vertices (vaff, xoff, xdeg, xedg, xwei, ks, N, NL)
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G, class FI, class FM>
+template <int HTYPE=3, class HWEIGHT=float, int PICKSTEP=4, class G, class FI, class FM>
 inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1102,8 +1102,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         bool isFirst = p==0;
         int m = 0;
         tl += measureDuration([&]() {
-          if (isFirst) m = louvainMoveCuU<HTYPE>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
-          else         m = louvainMoveCuU<HTYPE>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
+          if (isFirst) m = louvainMoveCuU<HTYPE, PICKSTEP>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
+          else         m = louvainMoveCuU<HTYPE, PICKSTEP>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
         });
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
@@ -1182,7 +1182,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
  * @param o louvain options
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G>
+template <int HTYPE=3, class HWEIGHT=float, int PICKSTEP=4, class G>
 inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1197,7 +1197,7 @@ inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   auto fm = [](F *vaff, const O *xoffD, const K *xdegD, const K *xedgD, const V *xwei, const vector<K>& ks, K N, K NL) {
     fillValueCuW(vaff, N, F(1));
   };
-  return louvainInvokeCuda<HTYPE, HWEIGHT>(x, o, fi, fm);
+  return louvainInvokeCuda<HTYPE, HWEIGHT, PICKSTEP>(x, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
