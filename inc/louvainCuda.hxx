@@ -41,7 +41,7 @@ using std::min;
 /** Threads per thread-block for aggregation phase, using block-per-vertex approach. */
 #define LOUVAIN_BLIM_AGGREGATE_BLOCK  1024
 /** Switch-degree between thread- and block-per-vertex kernels for aggregation phase. */
-#define LOUVAIN_SDEG_AGGREGATE        32
+#define LOUVAIN_SDEG_AGGREGATE        128
 #endif
 #pragma endregion
 
