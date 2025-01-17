@@ -1088,9 +1088,16 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
     TRY_CUDA( cudaMemcpy(xedgD, xedg.data(),  X    * sizeof(K), cudaMemcpyHostToDevice) );
     TRY_CUDA( cudaMemcpy(xweiD, xwei.data(),  X    * sizeof(V), cudaMemcpyHostToDevice) );
     // Initialize community membership and total vertex/community weights.
-    ti += mark([&]() { fi(ucomD, vtotD, ctotD, xoffD, xdegD, xedgD, xweiD, ks, N, NL); });
+    TRY_CUDA( cudaDeviceSynchronize() );
+    ti += mark([&]() {
+      fi(ucomD, vtotD, ctotD, xoffD, xdegD, xedgD, xweiD, ks, N, NL);
+      TRY_CUDA( cudaDeviceSynchronize() );
+    });
     // Mark affected vertices.
-    tm += mark([&]() { fm(vaffD, xoffD, xdegD, xedgD, xweiD, ks, N, NL); });
+    tm += mark([&]() {
+      fm(vaffD, xoffD, xdegD, xedgD, xweiD, ks, N, NL);
+      TRY_CUDA( cudaDeviceSynchronize() );
+    });
     // Perform Louvain iterations
     mark([&]() {
       // Start timing first pass.
@@ -1101,9 +1108,11 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         if (p==1) t1 = timeNow();
         bool isFirst = p==0;
         int m = 0;
+        TRY_CUDA( cudaDeviceSynchronize() );
         tl += measureDuration([&]() {
           if (isFirst) m = louvainMoveCuU<HTYPE>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
           else         m = louvainMoveCuU<HTYPE>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
+          TRY_CUDA( cudaDeviceSynchronize() );
         });
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
@@ -1118,11 +1127,13 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         else         louvainRenumberCommunitiesCuU(vcomD, cdegD, bufkD, K(GN), B);
         if (isFirst) {}
         else         louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
+        TRY_CUDA( cudaDeviceSynchronize() );
         ta += measureDuration([&]() {
           if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), B);
           else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), B);
           if (isFirst) louvainAggregateCuW<HTYPE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), B);
           else         louvainAggregateCuW<HTYPE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), B);
+          TRY_CUDA( cudaDeviceSynchronize() );
         });
         fillValueCuW(vtotD, size_t(CN), W());
         fillValueCuW(vaffD, size_t(CN), F(1));
@@ -1140,6 +1151,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
       else louvainLookupCommunitiesCuU(ucomD, vcomD, K(), K(N));
       if (p<=1) t1 = timeNow();
       tp += duration(t0, t1);
+      TRY_CUDA( cudaDeviceSynchronize() );
     });
   }, o.repeat);
   TRY_CUDA( cudaMemcpy(ucomc.data(), ucomD, N * sizeof(K), cudaMemcpyDeviceToHost) );
