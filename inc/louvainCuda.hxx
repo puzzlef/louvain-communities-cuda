@@ -337,7 +337,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
     hashtableClearCudW(hk, hv, H, 0, 1);
     louvainScanCommunitiesCudU<false, false, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     // Calculate delta modularity of moving u to each community.
-    W vdout = hashtableGetCud(hk, hv, H, T, d+1);  // Can be optimized?
+    W vdout = hashtableGetCud<HTYPE>(hk, hv, H, T, d+1);  // Can be optimized?
     louvainCalculateDeltaModularityCudU(hk, hv, H, d, ctot, vdout, vtot[u], ctot[d], M, R, 0, 1);
     // Find best community for u.
     hashtableMaxCudU(hk, hv, H, 0, 1);
@@ -441,7 +441,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     louvainScanCommunitiesCudU<false, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     __syncthreads();
     // Calculate delta modularity of moving u to each community.
-    if (t==0) vdout = (W) hashtableGetCud(hk, hv, H, T, d+1);  // Can be optimized?
+    if (t==0) vdout = (W) hashtableGetCud<HTYPE>(hk, hv, H, T, d+1);  // Can be optimized?
     __syncthreads();
     louvainCalculateDeltaModularityCudU(hk, hv, H, d, ctot, vdout, vtot[u], ctot[d], M, R, t, B);
     __syncthreads();
