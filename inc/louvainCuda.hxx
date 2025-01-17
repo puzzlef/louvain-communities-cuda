@@ -32,7 +32,7 @@ using std::min;
 /** Threads per thread-block for local-moving phase, using block-per-vertex approach. */
 #define LOUVAIN_BLIM_MOVE_BLOCK  32
 /** Switch-degree between thread- and block-per-vertex kernels for local-moving phase. */
-#define LOUVAIN_SDEG_MOVE        16
+#define LOUVAIN_SDEG_MOVE        64
 #endif
 
 #ifndef LOUVAIN_SDEG_AGGREGATE
