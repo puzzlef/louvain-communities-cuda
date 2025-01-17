@@ -76,7 +76,7 @@ void runExperiment(const G& x) {
   auto b1 = louvainStaticOmp(x, {REPEAT_METHOD});
   flog(b1, "louvainStaticOmp");
   auto b2 = louvainStaticCuda(x, {REPEAT_METHOD});
-  flog(b2, "louvainStaticCuda");
+  flog(b2, "louvainStaticCudaSharedmem");
 }
 
 

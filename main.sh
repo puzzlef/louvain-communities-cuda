@@ -22,6 +22,7 @@ if [[ "$DOWNLOAD" != "0" ]]; then
   rm -rf $src
   git clone https://github.com/puzzlef/$src
   cd $src
+  git checkout approach-hashtable-sharedmem
 fi
 
 # Fixed config
@@ -56,7 +57,7 @@ stdbuf --output=L ./a.out ~/Data/kmer_V1r.mtx        1 0 2>&1 | tee -a "$out"
 }
 
 # Run 5 times
-for i in {1..5}; do
+for i in {1..1}; do
   runEach
 done
 

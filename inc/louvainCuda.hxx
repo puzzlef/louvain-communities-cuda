@@ -319,21 +319,21 @@ template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, clas
 void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[BLIM];
-  // const int DMAX = BLIM;
-  // K shrk[2*DMAX];
-  // W shrw[2*DMAX];
+  const int DMAX = LOUVAIN_SDEG_MOVE;
+  K shrk[2*DMAX];
+  J shrw[2*DMAX];
   elb[t] = 0;
   for (K u=NB+B*b+t; u<NE; u+=G*B) {
     if (!vaff[u]) continue;
     // Scan communities connected to u.
     K d = vcom[u];
-    size_t EO = xoff[u];
+    // size_t EO = xoff[u];
     size_t EN = xdeg[u];
     if (EN==0 || EN >= LOUVAIN_SDEG_MOVE) continue;  // Skip isolated and high-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
-    K *hk = bufk + 2*EO;  // shrk
-    J *hv = bufw + 2*EO;  // shrw
+    K *hk = shrk;  // bufk + 2*EO;
+    J *hv = shrw;  // bufw + 2*EO;
     hashtableClearCudW(hk, hv, H, 0, 1);
     louvainScanCommunitiesCudU<false, false, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, 0, 1);
     // Calculate delta modularity of moving u to each community.
@@ -778,19 +778,19 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
 template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
 void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
-  // const int DMAX = BLIM;
-  // K shrk[2*DMAX];
-  // W shrw[2*DMAX];
+  const int DMAX = LOUVAIN_SDEG_AGGREGATE;
+  K shrk[2*DMAX];
+  J shrw[2*DMAX];
   for (K c=CB+B*b+t; c<CE; c+=G*B) {
-    size_t EO = yoff[c];
+    // size_t EO = yoff[c];
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
     if (CN==0 || EN >= LOUVAIN_SDEG_AGGREGATE) continue;  // Skip empty communities, or those with high total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
-    K *hk = bufk + 2*EO;  // shrk
-    J *hv = bufw + 2*EO;  // shrw
+    K *hk = shrk;  // bufk + 2*EO;
+    J *hv = shrw;  // bufw + 2*EO;
     // Get edges from community c into hashtable.
     hashtableClearCudW(hk, hv, H, 0, 1);
     for (size_t i=0; i<CN; ++i) {
