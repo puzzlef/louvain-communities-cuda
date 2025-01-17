@@ -775,7 +775,7 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, int SDEG_AGGREGATE=32, class O, class K, class V, class J>
 void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
@@ -786,7 +786,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
-    if (CN==0 || EN >= LOUVAIN_SDEG_AGGREGATE) continue;  // Skip empty communities, or those with high total degree
+    if (CN==0 || EN >= SDEG_AGGREGATE) continue;  // Skip empty communities, or those with high total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // shrk
@@ -830,11 +830,11 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, int SDEG_AGGREGATE=32, class O, class K, class V, class J>
 inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu(CE-CB, BLIM);
   const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_MAP_CUDA);
-  louvainAggregateEdgesThreadCukU<HTYPE, BLIM><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
+  louvainAggregateEdgesThreadCukU<HTYPE, BLIM, SDEG_AGGREGATE><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
 
 
@@ -857,7 +857,7 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, class O, class K, class V, class J>
+template <int HTYPE=3, int SDEG_AGGREGATE=32, class O, class K, class V, class J>
 void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   for (K c=CB+b; c<CE; c+=G) {
@@ -866,7 +866,7 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     size_t EN = yoff[c+1] - yoff[c];
     size_t CO = coff[c];
     size_t CN = coff[c+1] - coff[c];
-    if (CN==0 || EN < LOUVAIN_SDEG_AGGREGATE) continue;  // Skip empty communities, or those with low total degree
+    if (CN==0 || EN < SDEG_AGGREGATE) continue;  // Skip empty communities, or those with low total degree
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;
@@ -913,11 +913,11 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, class O, class K, class V, class J>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, int SDEG_AGGREGATE=32, class O, class K, class V, class J>
 inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu<true>(CE-CB, BLIM);
   const int G = gridSizeCu <true>(CE-CB, B, GRID_LIMIT_MAP_CUDA);
-  louvainAggregateEdgesBlockCukU<HTYPE><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
+  louvainAggregateEdgesBlockCukU<HTYPE, SDEG_AGGREGATE><<<G, B>>>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, CB, CE);
 }
 
 
@@ -942,14 +942,14 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J 
  * @param C number of communities
  * @param B size of buffer for exclusive scan
  */
-template <int HTYPE=3, class O, class K, class V, class J>
+template <int HTYPE=3, int SDEG_AGGREGATE=32, class O, class K, class V, class J>
 inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t B) {
   fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
   louvainCommunityTotalDegreeCuU(yoff, xdeg, vcom, K(), N);
   exclusiveScanCubW(yoff, bufo, yoff, C+1, B);
-  louvainAggregateEdgesThreadCuU<HTYPE>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
-  louvainAggregateEdgesBlockCuU <HTYPE>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesThreadCuU<HTYPE, 128,  SDEG_AGGREGATE>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
+  louvainAggregateEdgesBlockCuU <HTYPE, 1024, SDEG_AGGREGATE>(ydeg, yedg, ywei, bufk, bufw, xoff, xdeg, xedg, xwei, vcom, coff, cedg, yoff, K(), C);
 }
 #pragma endregion
 
@@ -992,7 +992,7 @@ inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
  * @param fm marking affected vertices (vaff, xoff, xdeg, xedg, xwei, ks, N, NL)
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G, class FI, class FM>
+template <int HTYPE=3, class HWEIGHT=float, int SDEG_AGGREGATE=32, class G, class FI, class FM>
 inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1121,8 +1121,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         ta += measureDuration([&]() {
           if (isFirst) louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, ucomD, K(N),  K(CN), B);
           else         louvainCommunityVerticesCuW(coffD, cdegD, cedgD, bufkD, vcomD, K(GN), K(CN), B);
-          if (isFirst) louvainAggregateCuW<HTYPE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), B);
-          else         louvainAggregateCuW<HTYPE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), B);
+          if (isFirst) louvainAggregateCuW<HTYPE, SDEG_AGGREGATE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, ucomD, coffD, cedgD, K(N),  K(CN), B);
+          else         louvainAggregateCuW<HTYPE, SDEG_AGGREGATE>(yoffD, ydegD, yedgD, yweiD, bufoD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vcomD, coffD, cedgD, K(GN), K(CN), B);
         });
         fillValueCuW(vtotD, size_t(CN), W());
         fillValueCuW(vaffD, size_t(CN), F(1));
@@ -1182,7 +1182,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
  * @param o louvain options
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G>
+template <int HTYPE=3, class HWEIGHT=float, int SDEG_AGGREGATE=32, class G>
 inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1197,7 +1197,7 @@ inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   auto fm = [](F *vaff, const O *xoffD, const K *xdegD, const K *xedgD, const V *xwei, const vector<K>& ks, K N, K NL) {
     fillValueCuW(vaff, N, F(1));
   };
-  return louvainInvokeCuda<HTYPE, HWEIGHT>(x, o, fi, fm);
+  return louvainInvokeCuda<HTYPE, HWEIGHT, SDEG_AGGREGATE>(x, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
