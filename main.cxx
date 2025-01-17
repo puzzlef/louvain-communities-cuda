@@ -75,8 +75,50 @@ void runExperiment(const G& x) {
   // Find static Louvain.
   auto b1 = louvainStaticOmp(x, {REPEAT_METHOD});
   flog(b1, "louvainStaticOmp");
-  auto b2 = louvainStaticCuda(x, {REPEAT_METHOD});
-  flog(b2, "louvainStaticCuda");
+  {
+    auto b2 = louvainStaticCuda<3, float, 1>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda1");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 2>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda2");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 4>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda4");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 8>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda8");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 16>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda16");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 32>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda32");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 64>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda64");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 128>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda128");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 256>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda256");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 512>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda512");
+  }
+  {
+    auto b2 = louvainStaticCuda<3, float, 1024>(x, {REPEAT_METHOD});
+    flog(b2, "louvainStaticCuda1024");
+  }
 }
 
 

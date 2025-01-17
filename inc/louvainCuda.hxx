@@ -315,7 +315,7 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, int SDEG_MOVE=16, class O, class K, class V, class W, class J, class F>
 void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[BLIM];
@@ -329,7 +329,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
     K d = vcom[u];
     size_t EO = xoff[u];
     size_t EN = xdeg[u];
-    if (EN==0 || EN >= LOUVAIN_SDEG_MOVE) continue;  // Skip isolated and high-degree vertices
+    if (EN==0 || EN >= SDEG_MOVE) continue;  // Skip isolated and high-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // shrk
@@ -381,11 +381,11 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, int SDEG_MOVE=16, class O, class K, class V, class W, class J, class F>
 inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu(NE-NB, BLIM);
   const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainMoveThreadCukU<HTYPE, BLIM><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
+  louvainMoveThreadCukU<HTYPE, BLIM, SDEG_MOVE><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
 }
 
 
@@ -410,7 +410,7 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, int SDEG_MOVE=16, class O, class K, class V, class W, class J, class F>
 void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
@@ -430,7 +430,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     // Scan communities connected to u.
     size_t EO = xoff[u];
     size_t EN = xdeg[u];
-    if (EN==0 || EN < LOUVAIN_SDEG_MOVE) continue;  // Skip isolated and low-degree vertices
+    if (EN==0 || EN < SDEG_MOVE) continue;  // Skip isolated and low-degree vertices
     size_t H = nextPow2Cud(EN) - 1;
     size_t T = nextPow2Cud(H)  - 1;
     K *hk = bufk + 2*EO;  // EN <= DMAX? shrk : bufk + 2*EO
@@ -486,11 +486,11 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, int SDEG_MOVE=16, class O, class K, class V, class W, class J, class F>
 inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu<true>(NE-NB, BLIM);
   const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
-  louvainMoveBlockCukU<HTYPE, BLIM><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
+  louvainMoveBlockCukU<HTYPE, BLIM, SDEG_MOVE><<<G, B>>>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, NB, NE, PICKLESS);
 }
 
 
@@ -515,7 +515,7 @@ inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, 
  * @param NL number of vertices with low degree
  * @param fc has local moving phase converged?
  */
-template <int HTYPE=3, class O, class K, class V, class W, class J, class F, class FC>
+template <int HTYPE=3, int SDEG_MOVE=16, class O, class K, class V, class W, class J, class F, class FC>
 inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
   int l = 0;
   double elH = 0;
@@ -523,8 +523,8 @@ inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *buf
   while (l < L) {
     bool PICKLESS = (l + PICKSTEP / 2) % PICKSTEP == 0;
     fillValueCuW(el, 1, 0.0);
-    louvainMoveThreadCuU<HTYPE>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
-    louvainMoveBlockCuU <HTYPE>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
+    louvainMoveThreadCuU<HTYPE, 64, SDEG_MOVE>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
+    louvainMoveBlockCuU <HTYPE, 32, SDEG_MOVE>(el, vcom, ctot, vaff, bufk, bufw, xoff, xdeg, xedg, xwei, vtot, M, R, K(), N, PICKLESS);
     TRY_CUDA( cudaMemcpy(&elH, el, sizeof(double), cudaMemcpyDeviceToHost) );
     if (fc(elH, l++)) break;
   }
@@ -992,7 +992,7 @@ inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
  * @param fm marking affected vertices (vaff, xoff, xdeg, xedg, xwei, ks, N, NL)
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G, class FI, class FM>
+template <int HTYPE=3, class HWEIGHT=float, int SDEG_MOVE=16, class G, class FI, class FM>
 inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1102,8 +1102,8 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
         bool isFirst = p==0;
         int m = 0;
         tl += measureDuration([&]() {
-          if (isFirst) m = louvainMoveCuU<HTYPE>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
-          else         m = louvainMoveCuU<HTYPE>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
+          if (isFirst) m = louvainMoveCuU<HTYPE, SDEG_MOVE>(elD, ucomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(N),  K(NL), fc);
+          else         m = louvainMoveCuU<HTYPE, SDEG_MOVE>(elD, vcomD, ctotD, vaffD, bufkD, bufwD, xoffD, xdegD, xedgD, xweiD, vtotD, M, R, L, K(GN), K(GN), fc);
         });
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
@@ -1182,7 +1182,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
  * @param o louvain options
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G>
+template <int HTYPE=3, class HWEIGHT=float, int SDEG_MOVE=16, class G>
 inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1197,7 +1197,7 @@ inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   auto fm = [](F *vaff, const O *xoffD, const K *xdegD, const K *xedgD, const V *xwei, const vector<K>& ks, K N, K NL) {
     fillValueCuW(vaff, N, F(1));
   };
-  return louvainInvokeCuda<HTYPE, HWEIGHT>(x, o, fi, fm);
+  return louvainInvokeCuda<HTYPE, HWEIGHT, SDEG_MOVE>(x, o, fi, fm);
 }
 #pragma endregion
 #pragma endregion
