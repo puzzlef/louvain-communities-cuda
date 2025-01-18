@@ -245,6 +245,61 @@ inline void __device__ louvainScanCommunitiesCudU(K *hk, J *hv, size_t H, size_t
 
 
 /**
+ * Scan communities connected to a vertex, in a fine-grained per-thread manner [device function].
+ * @tparam SELF include self-loops?
+ * @tparam BLOCK called from a thread block?
+ * @tparam HTYPE hashtable type (0: linear, 1: quadratic, 2: double, 3: quadritic + double)
+ * @param hk hashtable keys (updated)
+ * @param hv hashtable values (updated)
+ * @param H capacity of hashtable (prime)
+ * @param T secondary prime (>H)
+ * @param xoff offsets of input graph
+ * @param xdeg degrees of input graph
+ * @param xedg edge keys of input graph
+ * @param xwei edge values of input graph
+ * @param u given vertex
+ * @param vcom community each vertex belongs to
+ * @param i start index
+ * @param DI index stride
+ */
+template <bool SELF=false, bool BLOCK=false, int HTYPE=3, class O, class K, class V, class J>
+inline void __device__ louvainScanCommunitiesFineGrainedCudU(K *hk, J *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI) {
+  size_t EO = xoff[u];
+  size_t EN = xdeg[u];
+  if (i >= EN) return;
+  K v = xedg[EO+i];
+  V w = xwei[EO+i];
+  K c = vcom[v];
+  size_t ih = c+1;
+  size_t dh = 1;
+  size_t th = 0;
+  while (1) {
+    K kx = c+1;
+    J vx = (J) w;
+    if ((!SELF && u==v) || th >= H || hashtableAccumulateAtCudU<BLOCK>(hk, hv, ih % H, kx, vx)) {
+      i += DI;
+      if (i >= EN) break;
+      v = xedg[EO+i];
+      w = xwei[EO+i];
+      c = vcom[v];
+      ih = c+1;
+      dh = 1;
+      th = 0;
+    }
+    else {
+      ++th;
+      switch (HTYPE) {
+        case 0: ++ih; break;
+        case 1: ih += dh; dh *= 2; break;
+        case 2: ih += kx % T; break;
+        case 3: ih += dh; dh = dh*2 + (kx % T); break;
+      }
+    }
+  }
+}
+
+
+/**
  * Calculate delta modularity of moving a vertex to each community [device function].
  * @param hk hashtable keys
  * @param hv hashtable values (updated)
@@ -438,7 +493,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
     // __syncthreads();
     hashtableClearCudW(hk, hv, H, t, B);
     __syncthreads();
-    louvainScanCommunitiesCudU<false, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
+    louvainScanCommunitiesFineGrainedCudU<false, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     __syncthreads();
     // Calculate delta modularity of moving u to each community.
     if (t==0) vdout = (W) hashtableGetCud<HTYPE>(hk, hv, H, T, d+1);  // Can be optimized?
@@ -877,7 +932,7 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
     __syncthreads();
     for (size_t i=0; i<CN; ++i) {
       K u = cedg[CO+i];
-      louvainScanCommunitiesCudU<true, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
+      louvainScanCommunitiesFineGrainedCudU<true, true, HTYPE>(hk, hv, H, T, xoff, xdeg, xedg, xwei, u, vcom, t, B);
     }
     // Store edges from hashtable into aggregated graph.
     __syncthreads();
