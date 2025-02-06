@@ -1,218 +1,72 @@
-Design of OpenMP-based Dynamic [Louvain algorithm] for [community detection].
+Design of CUDA-based [Louvain algorithm] for [community detection].
 
-[Louvain algorithm] is an **agglomerative-hierarchical** community detection
-method that **greedily optimizes** for [modularity]. Given an *undirected*
-*weighted graph*, all vertices are first considered to be *their own*
-*communities*. In the **first phase**, each vertex greedily decides to move to
-the community of one of its neighbors which gives greatest increase in
-modularity. If moving to no neighbor's community leads to an increase in
-modularity, the vertex chooses to stay with its own community. This is done
-sequentially for all the vertices. If the total change in modularity is more
-than a certain threshold, this phase is repeated. Once this **local-moving**
-**phase** is complete, all vertices have formed their first hierarchy of
-communities. The **next phase** is called the **aggregation phase**, where all
-the *vertices belonging to a community* are *collapsed* into a single
-**super-vertex**, such that edges between communities are represented as edges
-between respective super-vertices (edge weights are combined), and edges within
-each community are represented as self-loops in respective super-vertices
-(again, edge weights are combined). Together, the local-moving and the
-aggregation phases constitute a **pass**. This super-vertex graph is then used
-as input for the next pass. This process continues until the increase in
-modularity is below a certain threshold. As a result from each pass, we have a
-*hierarchy of community memberships* for each vertex as a **dendrogram**. We
-generally consider the *top-level hierarchy* as the *final result* of community
-detection process.
+Community detection involves identifying natural divisions in networks, a crucial task for many large-scale applications. This report presents [GVE-Louvain], one of the most efficient multicore implementations of the Louvain algorithm, a high-quality method for community detection. Running on a dual 16-core Intel Xeon Gold 6226R server, GVE-Louvain outperforms Vite, Grappolo, NetworKit Louvain, and cuGraph Louvain (on an NVIDIA A100 GPU) by factors of `50x`, `22x`, `20x`, and `5.8x`, respectively, achieving a processing rate of `560M` edges per second on a `3.8B`-edge graph. Additionally, it scales efficiently, improving performance by `1.6x` for every thread doubling. The paper also presents **ν-Louvain**, a GPU-based implementation. When evaluated on an NVIDIA A100 GPU, **ν-Louvain** performs only on par with GVE-Louvain, largely due to reduced workload and parallelism in later algorithmic passes. These results suggest that CPUs, with their flexibility in handling irregular workloads, may be better suited for community detection tasks.
 
-*Louvain* algorithm is a hierarchical algorithm, and thus has two different
-tolerance parameters: `tolerance` and `passTolerance`. **tolerance** defines the
-minimum amount of increase in modularity expected, until the local-moving phase
-of the algorithm is considered to have converged. We compare the increase in
-modularity in each iteration of the local-moving phase to see if it is below
-`tolerance`. **passTolerance** defines the minimum amount of increase in
-modularity expected, until the entire algorithm is considered to have converged.
-We compare the increase in modularity across all iterations of the local-moving
-phase in the current pass to see if it is below `passTolerance`. `passTolerance`
-is normally set to `0` (we want to maximize our modularity gain), but the same
-thing does not apply for `tolerance`. Adjusting values of `tolerance` between
-each pass have been observed to impact the runtime of the algorithm, without
-significantly affecting the modularity of obtained communities. In this
-experiment, we compare the performance of *three different types* of OpenMP-based
-**dynamic Louvain** with respect to the *static* version.
+<br>
 
-**Naive-dynamic**:
-- We start with previous community membership of each vertex (instead of each vertex its own community).
 
-**Dynamic Delta-screening**:
-- All edge batches are undirected, and sorted by source vertex-id.
-- For edge deletions within the same community `i` and `j`,
-  `i`'s neighbors and `j`'s community is marked as affected.
-- For edge insertions across communities with source vertex `i` and highest modularity changing edge vertex `j*`,
-  `i`'s neighbors and `j*`'s community is marked as affected.
+Below we plot the time taken by [Grappolo] (Louvain), [NetworKit] Louvain, [Nido] (Louvain), [cuGraph] Louvain, and **ν-Louvain** on 13 different graphs. **ν-Louvain** surpasses Grappolo, NetworKit Louvain, Nido, and cuGraph Louvain by `20×`, `17×`, `61×`, and `5.0×` respectively, achieving a processing rate of `405M` edges/s on a `2.2𝐵` edge graph.
 
-**Dynamic Frontier**:
-- All edge batches are undirected.
-- For edge deletions within the same community `i` and `j`,
-  `i` is marked as affected.
-- For edge insertions across communities with source vertex `i` and destination vertex `j`,
-  `i` is marked as affected.
-- Vertices whose communities change in local-moving phase have their neighbors marked as affected.
+[![](https://github.com/user-attachments/assets/51ac7bb6-7bfd-4919-9169-df11eab2383e)][sheets-o1]
 
-The input data used for below experiments is available from the [SuiteSparse Matrix Collection].
-The experiments were done with guidance from [Prof. Kishore Kothapalli] and
-[Prof. Dip Sankar Banerjee].
+Below we plot the speedup of **ν-Louvain** wrt Grappolo, NetworKit Louvain, Nido, and cuGraph Louvain.
 
+[![](https://github.com/user-attachments/assets/0cbe60a2-d86d-457c-89e0-e64eef020213)][sheets-o1]
+
+Finally, we plot the modularity of communities identified by Grappolo, NetworKit Louvain, Nido, cuGraph Louvain, and **ν-Louvain**. **ν-Louvain** on average obtains `1.1%`, `1.2%`, and `1.3%` lower modularity than Grappolo, NetworKit
+Louvain, and cuGraph Louvain (where cuGraph Louvain runs), but `45%` higher modularity than Nido.
+
+[![](https://github.com/user-attachments/assets/de1170b7-5781-498a-b8c4-7b5ed157c4fa)][sheets-o1]
+
+Refer to our technical report for more details: \
+[CPU vs. GPU for Community Detection: Performance Insights from GVE-Louvain and ν-Louvain][report].
+
+<br>
+
+> [!NOTE]
+> You can just copy `main.sh` to your system and run it. \
+> For the code, refer to `main.cxx`.
+
+[GVE-Louvain]: https://arxiv.org/abs/2312.04876
+[Grappolo]: https://github.com/ECP-ExaGraph/grappolo
+[NetworKit]: https://github.com/networkit/networkit
+[Nido]: https://github.com/sg0/nido
+[cuGraph]: https://github.com/rapidsai/cugraph
 [Louvain algorithm]: https://en.wikipedia.org/wiki/Louvain_method
 [community detection]: https://en.wikipedia.org/wiki/Community_search
-[modularity]: https://en.wikipedia.org/wiki/Modularity_(networks)
 [Prof. Dip Sankar Banerjee]: https://sites.google.com/site/dipsankarban/
 [Prof. Kishore Kothapalli]: https://faculty.iiit.ac.in/~kkishore/
 [SuiteSparse Matrix Collection]: https://sparse.tamu.edu
-
-<br>
-
-
-### Comparision on large graphs
-
-In this experiment ([input-large]), we first compute the community membership of
-each vertex using the static Louvain algorithm. We then generate random batch
-updates consisting of an equal mix of *deletions (-)* and  *insertions (+)* of
-edges of size `10^-7 |E|` to `0.1 |E|` in multiples of `10` (where `|E|` is the
-number of edges in the original graph after making it undirected). For each
-batch size, we generate *five* different batches for the purpose of *averaging*.
-Each batch of edges (insertion / deletion) is generated randomly such that the
-selection of each vertex (as endpoint) is *equally probable*. We choose the
-Louvain *parameters* as `resolution = 1.0`, `tolerance = 1e-2` (for local-moving
-phase) with *tolerance* decreasing after every pass by a factor of
-`toleranceDrop = 10`, an `aggregationTolerance = 0.8` which considers
-communities to have converged when a few communities merge together, and a
-`passTolerance = 0.0` (when passes stop). In addition we limit the maximum
-number of iterations in a single local-moving phase with `maxIterations = 20`,
-and limit the maximum number of passes with `maxPasses = 10`. We run the Louvain
-algorithm until convergence (or until the maximum limits are exceeded), and
-measure the **time taken** for the *computation* and *pre-processing* (for
-dynamic approaches), the **modularity** **score**, the **total number of**
-**iterations** (in the *local-moving phase*), and the number of **passes**. This
-is repeated for each input graph.
-
-From the results, we make make the following observations. **Dynamic Frontier**
-based **Louvain** converges the fastest, which obtaining communities with
-equivalent modularity. We also observe that **Dynamic Delta-screening** based
-**Louvain** has poorer performance than the Naive-dynamic approach (due to its
-high pre-processing cost/overhead). Therefore, **Dynamic Frontier based**
-**Louvain** would be the **best choice**. We also not that **Louvain** algorithm
-does not scale too well with an increase in the number of threads. This is
-likely due to higher pressure on cache coherence system as well as the algorithm
-becoming closer to a synchronous approach, which is inherently slower than an
-asynchronous approach. Trying to avoid community swaps with parallel approach
-does not seem to improve performance by any significant amount. However, it is
-possible that if synchronous approach is used with OpenMP, then its performance
-may be a bit better.
-
-> See
-> [code](https://github.com/puzzlef/louvain-communities-openmp-dynamic/tree/input-large),
-> [output](https://gist.github.com/wolfram77/adbef451db5bf46f1a7243349121a860), or
-> [sheets].
-
-
-[![](https://i.imgur.com/qCYVeh4.png)][sheets]
-[![](https://i.imgur.com/4PBroEt.png)][sheets]
-[![](https://i.imgur.com/T2LG2RJ.png)][sheets]
-[![](https://i.imgur.com/WdOu1ON.png)][sheets]
-[![](https://i.imgur.com/fGrM5an.png)][sheets]
-[![](https://i.imgur.com/3xfJBsD.png)][sheets]
-
-We also measure the pass-wise and phase-wise split of time taken for each
-approach. **Dynamic Frontier** approach only performs more than one pass when
-batch size is large enough.
-
-[![](https://i.imgur.com/qccysjM.png)][sheets]
-[![](https://i.imgur.com/gK9NS6b.png)][sheets]
-[![](https://i.imgur.com/p8439Ry.png)][sheets]
-[![](https://i.imgur.com/kCyhyMf.png)][sheets]
-
-Each pass of Louvain is divided into two main phases: *local-moving*, and
-*aggregation*. In addition to the two, *other work* also need to be
-performed. These include:
-- Initializing vertex weights, community weights, and community memberships
-- Re-numbering community IDs
-- Flattening dendrogram (lookups)
-- Obtaining vertices beloning to each community
-- Clearing various buffers
-
-With **Dynamic Frontier**, most time is spent doing this *other work*, followed by
-*local-moving* phase, and then the *aggregation* phase.
-
-[![](https://i.imgur.com/DrHWAgO.png)][sheets]
-[![](https://i.imgur.com/2EFYN1X.png)][sheets]
-[![](https://i.imgur.com/5eSzJzf.png)][sheets]
-[![](https://i.imgur.com/xSREmHM.png)][sheets]
-
-[sheets]: https://docs.google.com/spreadsheets/d/1F6Z-lWNDYynm6m2PTsIN_nxMu8Y9CrkIQagCU0Nr2LU/edit?usp=sharing
-
-<br>
-
-
-### Measure communities
-
-In this experiment ([measure-communities]), we **measure** the **properties of**
-**communities obtained** with *Static Louvain* algorithm. These include the
-*number of communities*, the *size distribution of communities* (*gini*
-*coefficient*), and the *overall modularity score*.
-
-[measure-communities]: https://github.com/puzzlef/louvain-communities-openmp-dynamic/tree/measure-communities
-
-<br>
-
-
-### Measure affected vertices
-
-In this experiment ([measure-affected]), we **measure** the number of **affected**
-**vertices** with *Dynamic* *Delta-screening* and *Dynamic Frontier* based
-*Louvain* for random batch updates consisting of edge insertions, with the size
-of batch update varying from `10^-6 |E|` to `0.1 |E|`.
-
-Results show that *Dynamic Delta-screening* marks `15000x`, `2000x`, `440x`,
-`44x`, `6.4x`, and `1.7x` the number of affected vertices as *Dynamic Frontier*
-based approach on batch updates of size `10^-6 |E|` to `0.1 |E|`.
-
-[measure-affected]: https://github.com/puzzlef/louvain-communities-openmp-dynamic/tree/measure-affected
-
-<br>
-
-
-### Multi-batch updates
-
-In this experiment ([multi-batch]), we generate `5000` random **multi-batch updates** consisting
-of *edge insertions* of size `10^-3 |E|` one after the other on graphs
-`web-Stanford` and `web-BerkStan` and observe the performance and modularity of
-communities obtained with *Static*, *Naive-dynamic*, *Dynamic Delta-screening*,
-and *Dynamic Frontier* based *Louvain*. We do this to measure after how many
-batch updates do we need to re-run the static algorithm.
-
-Our results indicate that we need to rerun the static algorithm after `~1300`
-batch updates with *Dynamic Delta-screening* based *Louvain*, and after `~2800`
-batch updates with *Dynamic Frontier* based *Louvain*.
-
-[multi-batch]: https://github.com/puzzlef/louvain-communities-openmp-dynamic/tree/multi-batch
+[sheets-o1]: https://docs.google.com/spreadsheets/d/1eXc7hkjuEAoIGLagzQrNQF_YubvdUiupgqJHPNxxFnk/edit?usp=sharing
+[report]: https://arxiv.org/abs/2501.19004
 
 <br>
 <br>
 
 
-## Build instructions
+### Code structure
 
-To run the [input-large] experiment, download this repository and run the
-following. Note that input graphs must be placed in `~/Data` directory, and
-output logs will be written to `~/Logs` directory.
+The code structure of **ν-Louvain** is as follows:
 
 ```bash
-# Perform comparision on large graphs
-$ DOWNLOAD=0 ./mains.sh
-
-# Perform comparision on large graphs with custom number of threads
-$ DOWNLOAD=0 MAX_THREADS=4 ./mains.sh
+- inc/_*.hxx: Utility functions
+- inc/**.hxx: Common graph functions
+- inc/csr.hxx: Compressed Sparse Row (CSR) data structure functions
+- inc/Graph.hxx: Graph data structure
+- inc/louvian.hxx: OpenMP-based Louvian algorithm
+- inc/louvainCuda.hxx: CUDA-based Louvian algorithm
+- inc/hashtableCuda.hxx: CUDA-based hybrid quadratic-double hashtable
+- inc/mtx.hxx: Graph (MTX format) file reader
+- inc/properties.hxx: Graph property functions (e.g., modularity)
+- inc/symmetrize.hxx: Make graph symmetric
+- inc/update.hxx: Graph update functions
+- inc/main.hxx: Main header
+- main.cxx: Experimentation code
+- main.sh: Experimentation script
+- process.js: Node.js script for processing output logs
 ```
 
+Note that each branch in this repository contains code for a specific experiment. The `main` branch contains code for the final experiment. If the intention of a branch in unclear, or if you have comments on our technical report, feel free to open an issue.
 
 <br>
 <br>
@@ -232,5 +86,5 @@ $ DOWNLOAD=0 MAX_THREADS=4 ./mains.sh
 <br>
 
 
-[![](https://i.imgur.com/UGB0g2L.jpg)](https://www.youtube.com/watch?v=pIF3wOet-zw)<br>
+[![](https://img.youtube.com/vi/yqO7wVBTuLw/maxresdefault.jpg)](https://www.youtube.com/watch?v=yqO7wVBTuLw)<br>
 [![ORG](https://img.shields.io/badge/org-puzzlef-green?logo=Org)](https://puzzlef.github.io)
