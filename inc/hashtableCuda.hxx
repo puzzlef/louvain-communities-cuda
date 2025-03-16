@@ -62,9 +62,9 @@ inline bool __device__ hashtableAccumulateCudU(K *hk, V * hv, size_t H, size_t T
     if (hashtableAccumulateAtCudU<BLOCK>(hk, hv, i % H, k, v)) return true;
     switch (HTYPE) {
       case 0: ++i; break;
-      case 1: i += di; di *= 2; break;
+      case 1: i += di; di += 2; break;
       case 2: i += k % T; break;
-      case 3: i += di; di = di*2 + (k % T); break;
+      case 3: i += di; di += 2 + (k % T); break;
     }
   }
   return false;
@@ -88,9 +88,9 @@ inline V __device__ hashtableGetCud(const K *hk, const V *hv, size_t H, size_t T
     if (hk[i % H]==k) return hv[i % H];
     switch (HTYPE) {
       case 0: ++i; break;
-      case 1: i += di; di *= 2; break;
+      case 1: i += di; di += 2; break;
       case 2: i += k % T; break;
-      case 3: i += di; di = di*2 + (k % T); break;
+      case 3: i += di; di += 2 + (k % T); break;
     }
   }
   return V();
