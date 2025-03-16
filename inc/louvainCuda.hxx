@@ -230,7 +230,7 @@ inline void louvainInitializeCuW(K *vcom, W *ctot, const W *vtot, K NB, K NE) {
  * @param i start index
  * @param DI index stride
  */
-template <bool SELF=false, bool BLOCK=false, int HTYPE=3, class O, class K, class V, class J>
+template <bool SELF=false, bool BLOCK=false, int HTYPE=1, class O, class K, class V, class J>
 inline void __device__ louvainScanCommunitiesCudU(K *hk, J *hv, size_t H, size_t T, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, K u, const K *vcom, size_t i, size_t DI) {
   size_t EO = xoff[u];
   size_t EN = xdeg[u];
@@ -315,7 +315,7 @@ inline void __device__ louvainMarkNeighborsCudU(F *vaff, const O *xoff, const K 
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
 void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   __shared__ double elb[BLIM];
@@ -381,7 +381,7 @@ void __global__ louvainMoveThreadCukU(double *el, K *vcom, W *ctot, F *vaff, K *
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_MOVE_THREAD, class O, class K, class V, class W, class J, class F>
 inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu(NE-NB, BLIM);
   const int G = gridSizeCu (NE-NB, B, GRID_LIMIT_MAP_CUDA);
@@ -410,7 +410,7 @@ inline void louvainMoveThreadCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk,
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
 void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
@@ -486,7 +486,7 @@ void __global__ louvainMoveBlockCukU(double *el, K *vcom, W *ctot, F *vaff, K *b
  * @param NE end vertex (exclusive)
  * @param PICKLESS allow only picking smaller community id?
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_MOVE_BLOCK, class O, class K, class V, class W, class J, class F>
 inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, K NB, K NE, bool PICKLESS) {
   const int B = blockSizeCu<true>(NE-NB, BLIM);
   const int G = gridSizeCu <true>(NE-NB, B, GRID_LIMIT_MAP_CUDA);
@@ -515,7 +515,7 @@ inline void louvainMoveBlockCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, 
  * @param NL number of vertices with low degree
  * @param fc has local moving phase converged?
  */
-template <int HTYPE=3, class O, class K, class V, class W, class J, class F, class FC>
+template <int HTYPE=1, class O, class K, class V, class W, class J, class F, class FC>
 inline int louvainMoveCuU(double *el, K *vcom, W *ctot, F *vaff, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const W *vtot, W M, W R, int L, K N, K NL, FC fc) {
   int l = 0;
   double elH = 0;
@@ -775,7 +775,7 @@ inline void louvainRenumberCommunitiesCuU(K *vcom, K *cext, K *bufk, K N, size_t
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
 void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   // const int DMAX = BLIM;
@@ -830,7 +830,7 @@ void __global__ louvainAggregateEdgesThreadCukU(K *ydeg, K *yedg, V *ywei, K *bu
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_AGGREGATE_THREAD, class O, class K, class V, class J>
 inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu(CE-CB, BLIM);
   const int G = gridSizeCu (CE-CB, B, GRID_LIMIT_MAP_CUDA);
@@ -857,7 +857,7 @@ inline void louvainAggregateEdgesThreadCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, class O, class K, class V, class J>
+template <int HTYPE=1, class O, class K, class V, class J>
 void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   DEFINE_CUDA(t, b, B, G);
   for (K c=CB+b; c<CE; c+=G) {
@@ -913,7 +913,7 @@ void __global__ louvainAggregateEdgesBlockCukU(K *ydeg, K *yedg, V *ywei, K *buf
  * @param CB begin community (inclusive)
  * @param CE end community (exclusive)
  */
-template <int HTYPE=3, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, class O, class K, class V, class J>
+template <int HTYPE=1, int BLIM=LOUVAIN_BLIM_AGGREGATE_BLOCK, class O, class K, class V, class J>
 inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, const O *yoff, K CB, K CE) {
   const int B = blockSizeCu<true>(CE-CB, BLIM);
   const int G = gridSizeCu <true>(CE-CB, B, GRID_LIMIT_MAP_CUDA);
@@ -942,7 +942,7 @@ inline void louvainAggregateEdgesBlockCuU(K *ydeg, K *yedg, V *ywei, K *bufk, J 
  * @param C number of communities
  * @param B size of buffer for exclusive scan
  */
-template <int HTYPE=3, class O, class K, class V, class J>
+template <int HTYPE=1, class O, class K, class V, class J>
 inline void louvainAggregateCuW(O *yoff, K *ydeg, K *yedg, V *ywei, O *bufo, K *bufk, J *bufw, const O *xoff, const K *xdeg, const K *xedg, const V *xwei, const K *vcom, const O *coff, const K *cedg, K N, K C, size_t B) {
   fillValueCuW(yoff, C+1, O());
   fillValueCuW(ydeg, C, K());
@@ -992,7 +992,7 @@ inline size_t louvainPartitionVerticesCudaU(vector<K>& ks, const G& x) {
  * @param fm marking affected vertices (vaff, xoff, xdeg, xedg, xwei, ks, N, NL)
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G, class FI, class FM>
+template <int HTYPE=1, class HWEIGHT=float, class G, class FI, class FM>
 inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm) {
   using O = uint32_t;
   using K = typename G::key_type;
@@ -1182,7 +1182,7 @@ inline auto louvainInvokeCuda(const G& x, const LouvainOptions& o, FI fi, FM fm)
  * @param o louvain options
  * @returns louvain result
  */
-template <int HTYPE=3, class HWEIGHT=float, class G>
+template <int HTYPE=1, class HWEIGHT=float, class G>
 inline auto louvainStaticCuda(const G& x, const LouvainOptions& o={}) {
   using O = uint32_t;
   using K = typename G::key_type;
